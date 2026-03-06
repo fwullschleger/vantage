@@ -357,3 +357,22 @@ async def get_jj_diff(rev: str, path: str | None = None):
     if not diff:
         raise HTTPException(status_code=404, detail="Could not generate jj diff")
     return diff
+
+
+@router.get("/r/{repo}/jj/interdiff", response_model=FileDiff)
+async def get_jj_interdiff_multi(repo: str, from_rev: str, to_rev: str, path: str | None = None):
+    jj = get_jj_service(repo)
+    diff = jj.get_interdiff(from_rev=from_rev, to_rev=to_rev, path=path)
+    if not diff:
+        raise HTTPException(status_code=404, detail="No changes between these revisions")
+    return diff
+
+
+@router.get("/jj/interdiff", response_model=FileDiff)
+async def get_jj_interdiff(from_rev: str, to_rev: str, path: str | None = None):
+    _require_single_repo_mode()
+    jj = get_jj_service()
+    diff = jj.get_interdiff(from_rev=from_rev, to_rev=to_rev, path=path)
+    if not diff:
+        raise HTTPException(status_code=404, detail="No changes between these revisions")
+    return diff

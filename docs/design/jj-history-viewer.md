@@ -42,12 +42,13 @@ All endpoints exist in both single-repo (`/api/jj/...`) and multi-repo (`/api/r/
 | `GET /jj/log?path=&limit=50` | `JJRevision[]` | Revision log, optionally filtered to a file |
 | `GET /jj/evolog?rev=@&limit=20` | `JJEvoEntry[]` | How a specific change evolved over time |
 | `GET /jj/diff?rev=&path=` | `FileDiff` | Git-format diff for a revision |
+| `GET /jj/interdiff?from_rev=&to_rev=&path=` | `FileDiff` | Diff between two revisions (for snapshot comparisons) |
 
 Limits are capped server-side (log: 200, evolog: 100) to prevent expensive queries.
 
 ### Frontend
 
-**Store (`useJJStore`):** A Zustand store managing jj-specific state, mirroring the pattern of `useGitStore`. Provides `fetchInfo`, `fetchLog`, `fetchEvolog`, `fetchDiff` methods.
+**Store (`useJJStore`):** A Zustand store managing jj-specific state, mirroring the pattern of `useGitStore`. Provides `fetchInfo`, `fetchLog`, `fetchEvolog`, `fetchDiff`, and `fetchInterdiff` methods.
 
 **HistoryPage:** Enhanced with a jj/Git mode toggle. When in jj mode, shows a violet-themed timeline of revisions with:
 - Working copy indicator (pencil icon + ring highlight)
@@ -55,6 +56,8 @@ Limits are capped server-side (log: 200, evolog: 100) to prevent expensive queri
 - Change ID (short) displayed prominently
 - Click-to-view diff
 - "Show evolution" toggle per revision that expands evolog entries inline
+
+**Snapshot tab** shows the evolution log for the working copy revision. Clicking a snapshot entry shows an interdiff (what changed between that snapshot and the previous one), not the full revision diff. This lets users see exactly what edits were captured in each automatic snapshot. The oldest snapshot falls back to a full diff against the parent.
 
 **Evolog entries** show:
 - Description at that point in time
@@ -99,7 +102,7 @@ All `JJService` methods check `self.is_jj` first and return empty/None for non-j
 Backend:
   src/vantage/services/jj_service.py     # JJService class (~300 lines)
   src/vantage/schemas/models.py          # JJRevision, JJEvoEntry, JJInfo
-  src/vantage/routers/api.py             # /jj/* endpoints (8 routes)
+  src/vantage/routers/api.py             # /jj/* endpoints (10 routes)
   tests/test_api.py                      # Basic endpoint tests
 
 Frontend:
@@ -115,8 +118,7 @@ Docs:
 
 ## Future Work
 
-- **Interdiff viewing:** UI for comparing two evolution entries of the same change
-- **File-level evolog:** Show evolution filtered to a specific file path
+- **File-level evolog:** Show evolution filtered to a specific file path (currently shows all changes in a revision, not just those affecting the viewed file)
 - **jj op log:** Show the operation log (repo-wide history of all jj operations)
 - **Inline evolution in ViewerPage:** Show evolution without navigating to HistoryPage
 - **Real-time jj updates:** Watch `.jj/` directory for changes and refresh jj data
