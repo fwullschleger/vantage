@@ -213,6 +213,15 @@ class JJService:
             return None
 
         # Get revision info for the header
+        sep_expr = f' ++ "{_SEP}" ++ '
+        template = sep_expr.join(
+            [
+                "change_id.shortest()",
+                "description.first_line()",
+                "author.name()",
+                "author.timestamp().utc()",
+            ]
+        )
         info = self._run_jj(
             [
                 "log",
@@ -222,14 +231,7 @@ class JJService:
                 "--limit",
                 "1",
                 "-T",
-                _SEP.join(
-                    [
-                        "change_id.shortest()",
-                        "description.first_line()",
-                        "author.name()",
-                        "author.timestamp().utc()",
-                    ]
-                ),
+                template,
             ]
         )
 
@@ -273,11 +275,36 @@ class JJService:
         if not hunks:
             return None
 
+        # Get metadata from the to_rev
+        sep_expr = f' ++ "{_SEP}" ++ '
+        template = sep_expr.join(
+            [
+                "change_id.shortest()",
+                "description.first_line()",
+                "author.name()",
+                "author.timestamp().utc()",
+            ]
+        )
+        info = self._run_jj(["log", "-r", to_rev, "--no-graph", "--limit", "1", "-T", template])
+
+        change_id = to_rev
+        message = f"Changes from {from_rev} to {to_rev}"
+        author = ""
+        ts = datetime.now()
+        if info:
+            parts = info.strip().split(_SEP)
+            if len(parts) >= 4:
+                change_id = parts[0]
+                message = parts[1] or f"Snapshot {change_id}"
+                author = parts[2]
+                with contextlib.suppress(Exception):
+                    ts = self._parse_timestamp(parts[3])
+
         return FileDiff(
-            commit_hexsha=f"{from_rev}..{to_rev}",
-            commit_message=f"Changes from {from_rev} to {to_rev}",
-            commit_author="",
-            commit_date=datetime.now(),
+            commit_hexsha=f"{from_rev[:8]}..{to_rev[:8]}",
+            commit_message=message,
+            commit_author=author,
+            commit_date=ts,
             file_path=path or "(all files)",
             hunks=hunks,
             raw_diff=output,

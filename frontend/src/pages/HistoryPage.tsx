@@ -372,9 +372,15 @@ export const HistoryPage: React.FC = () => {
           ) : (
             <SnapshotTimeline
               evolog={jj.evolog}
-              onEntryClick={(entry) => {
+              onEntryClick={(entry, index) => {
                 if (filePath) {
-                  jj.fetchDiff(entry.commit_id, filePath);
+                  const prevEntry = jj.evolog[index + 1];
+                  if (prevEntry) {
+                    jj.fetchInterdiff(prevEntry.commit_id, entry.commit_id, filePath);
+                  } else {
+                    // Oldest snapshot — show full diff from parent
+                    jj.fetchDiff(entry.commit_id, filePath);
+                  }
                 }
               }}
             />
@@ -672,7 +678,7 @@ const JJTimeline: React.FC<{
 // Snapshot timeline — shows evolog of working copy (automatic jj saves)
 const SnapshotTimeline: React.FC<{
   evolog: JJEvoEntry[];
-  onEntryClick: (entry: JJEvoEntry) => void;
+  onEntryClick: (entry: JJEvoEntry, index: number) => void;
 }> = ({ evolog, onEntryClick }) => {
   return (
     <div className="relative">
@@ -701,7 +707,7 @@ const SnapshotTimeline: React.FC<{
 
             {/* Snapshot card */}
             <button
-              onClick={() => onEntryClick(entry)}
+              onClick={() => onEntryClick(entry, index)}
               className={cn(
                 "ml-4 flex-1 text-left bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl p-4 transition-all cursor-pointer",
                 "hover:border-violet-200 dark:hover:border-violet-700 hover:shadow-md hover:bg-violet-50/30 dark:hover:bg-violet-900/20",
