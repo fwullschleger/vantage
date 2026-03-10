@@ -131,3 +131,192 @@ code {
   0% { background-color: rgb(251 191 36 / 0.1); }
   100% { background-color: transparent; }
 }
+
+/* ──────────────────────────────────────────
+   Print stylesheet
+   ────────────────────────────────────────── */
+@media print {
+  /* Force light colors regardless of dark mode */
+  * {
+    color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Hide all chrome: sidebar, header bar, modals, buttons, scrollbars */
+  /* Sidebar (w-72 fixed/relative) */
+  .flex.h-screen > .w-72,
+  /* Mobile sidebar backdrop */
+  .fixed.inset-0.z-40,
+  /* Header / breadcrumb bar */
+  .h-14.border-b,
+  /* All modals/overlays */
+  [role="dialog"],
+  .fixed.inset-0 {
+    display: none !important;
+  }
+
+  /* Remove layout constraints so content flows naturally */
+  .flex.h-screen {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* Main content column */
+  .flex-1.flex.flex-col.overflow-hidden {
+    display: block !important;
+    overflow: visible !important;
+  }
+
+  /* Scrollable content area */
+  [data-content-scroll] {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* Content wrapper — full width for print */
+  [data-content-scroll] > div {
+    max-width: 100% !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Reset backgrounds to white */
+  body,
+  .bg-white,
+  .bg-slate-50,
+  .bg-slate-900,
+  .dark .bg-slate-900,
+  .dark .bg-slate-800 {
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Prose content: ensure readable black text */
+  .prose,
+  .prose * {
+    color: #1a1a1a !important;
+  }
+
+  .prose a {
+    color: #1a1a1a !important;
+    text-decoration: underline !important;
+  }
+
+  /* Show URL after links */
+  .prose a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #666 !important;
+    word-break: break-all;
+  }
+
+  /* Keep code styling subtle but visible */
+  .prose pre {
+    background: #f6f8fa !important;
+    border: 1px solid #d0d7de !important;
+    padding: 12px 16px !important;
+    border-radius: 6px !important;
+    overflow-x: visible !important;
+    white-space: pre-wrap !important;
+    word-wrap: break-word !important;
+  }
+
+  .prose pre code {
+    color: #24292f !important;
+    font-size: 11px !important;
+  }
+
+  .prose code {
+    background: #f0f2f5 !important;
+    color: #24292f !important;
+    border: 1px solid #d0d7de !important;
+  }
+
+  /* Tables */
+  .prose table {
+    border-collapse: collapse !important;
+  }
+
+  .prose th {
+    background: #f6f8fa !important;
+    color: #24292f !important;
+    border: 1px solid #d0d7de !important;
+  }
+
+  .prose td {
+    border: 1px solid #d0d7de !important;
+    color: #24292f !important;
+  }
+
+  /* Blockquotes */
+  .prose blockquote {
+    border-left-color: #d0d7de !important;
+    color: #57606a !important;
+  }
+
+  /* Headings: keep hierarchy visible */
+  .prose h1 {
+    border-bottom: 1px solid #d0d7de !important;
+  }
+
+  .prose h2 {
+    border-bottom: 1px solid #d0d7de !important;
+  }
+
+  /* Images */
+  .prose img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  /* Page break management */
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+    page-break-after: avoid;
+    break-after: avoid;
+  }
+
+  .prose pre, .prose table, .prose blockquote, .prose img {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+
+  .prose p {
+    orphans: 3;
+    widows: 3;
+  }
+
+  /* Mermaid diagrams */
+  .mermaid svg {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+
+  /* Page setup */
+  @page {
+    margin: 1.5cm 2cm;
+    size: A4;
+  }
+
+  /* Remove animations */
+  .animate-flash-update {
+    animation: none !important;
+  }
+
+  /* Hide syntax highlighting theme overrides — use plain text */
+  .hljs {
+    background: transparent !important;
+    color: #24292f !important;
+  }
+
+  /* Reset dark-mode overrides for code tokens */
+  .hljs-comment, .hljs-quote { color: #6a737d !important; }
+  .hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-type { color: #d73a49 !important; }
+  .hljs-string, .hljs-attr, .hljs-addition { color: #032f62 !important; }
+  .hljs-number, .hljs-literal, .hljs-variable, .hljs-template-variable { color: #005cc5 !important; }
+  .hljs-title, .hljs-section, .hljs-name { color: #6f42c1 !important; }
+  .hljs-deletion { color: #b31d28 !important; }
+  .hljs-meta { color: #6f42c1 !important; }
+  .hljs-symbol, .hljs-bullet, .hljs-link { color: #005cc5 !important; }
+}
