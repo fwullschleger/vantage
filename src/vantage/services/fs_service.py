@@ -90,6 +90,7 @@ class FileSystemService:
 
         Stops as soon as one is found for speed.
         Results are cached with a TTL to avoid repeated os.walk() calls.
+        Limits depth to 5 levels to avoid scanning enormous nested trees.
         """
         cache_key = str(dir_path)
         now = time.monotonic()
@@ -99,8 +100,13 @@ class FileSystemService:
             if now - ts < _MD_DIR_CACHE_TTL:
                 return result
 
+        root_depth = str(dir_path).count(os.sep)
+        max_depth = 5
         try:
-            for _dirpath, _dirnames, filenames in os.walk(dir_path):
+            for dirpath, dirnames, filenames in os.walk(dir_path):
+                if dirpath.count(os.sep) - root_depth >= max_depth:
+                    dirnames.clear()
+                    continue
                 for fname in filenames:
                     if fname.lower().endswith(".md"):
                         _md_dir_cache[cache_key] = (now, True)

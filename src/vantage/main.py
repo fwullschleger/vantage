@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -8,13 +9,16 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from vantage.routers import api, socket
-from vantage.services.perf import PerfMiddleware
+from vantage.services.perf import APP_VERSION, GIT_SHA, PerfMiddleware
 from vantage.services.watcher import watch_multi_repo, watch_repo
 from vantage.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    logger.info("Vantage v%s (git %s) starting up", APP_VERSION, GIT_SHA)
     # Startup logic - use multi-repo watcher in daemon mode
     if settings.multi_repo:
         watcher_task = asyncio.create_task(watch_multi_repo())

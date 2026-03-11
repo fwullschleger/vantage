@@ -240,6 +240,12 @@ class GitService:
         Results are cached with a short TTL.  This is the single biggest
         performance win: ``git status -uall`` costs ~4.5 s on large repos
         and was previously called 80+ times per page load with no caching.
+
+        Uses ``-unormal`` instead of ``-uall`` to avoid enumerating every
+        individual untracked file in deeply nested trees (GroundTruthBlobEx2
+        with 100K+ files was the production bottleneck).  ``-unormal`` shows
+        untracked directories rather than individual files, which is
+        sufficient for tree status annotations.
         """
         if not self.repo or not self.repo.working_dir:
             return {}
@@ -256,7 +262,7 @@ class GitService:
         result: dict[str, str] = {}
         try:
             proc = subprocess.run(
-                ["git", "status", "--porcelain=v1", "-uall"],
+                ["git", "status", "--porcelain=v1", "-unormal"],
                 capture_output=True,
                 text=True,
                 cwd=self.repo.working_dir,
