@@ -71,14 +71,23 @@ async def _coalesce_and_broadcast(
     if not pending:
         return
 
-    # If any pending path is a git state file, invalidate the recent-files
-    # cache so the next API call returns fresh data.
+    # Always invalidate git-status cache on any file change — working
+    # directory status reflects file state, not just git state.
+    from vantage.services.fs_service import clear_md_dir_cache
+    from vantage.services.git_service import clear_recent_files_cache, clear_status_cache
+
+    clear_status_cache()
+
+    # If a .md file was added or removed, clear the dir-has-markdown cache
+    if any(p.lower().endswith(".md") for p in pending):
+        clear_md_dir_cache()
+
+    # If any pending path is a git state file, also invalidate the
+    # recent-files cache so the next API call returns fresh data.
     has_git_change = any(_is_git_state_change(p) for p in pending)
     if has_git_change:
-        from vantage.services.git_service import clear_recent_files_cache
-
         clear_recent_files_cache()
-        logger.debug("Cleared recent-files cache due to git state change")
+        logger.debug("Cleared recent-files + git-status caches due to git state change")
 
     unique_paths = sorted(pending)
     msg: dict[str, object] = {"type": "files_changed", "paths": unique_paths}

@@ -1,9 +1,25 @@
+import logging
 import os
+import time
 from pathlib import Path
 
 from vantage.schemas.models import FileContent, FileNode
 from vantage.services.git_service import GitService
 from vantage.services.perf import timed
+
+logger = logging.getLogger(__name__)
+
+# TTL cache for _dir_has_markdown results.  Avoids repeated os.walk()
+# calls per subdirectory listing — the old code walked every subdirectory
+# recursively for every list_directory call (50+ walks per page load).
+_md_dir_cache: dict[str, tuple[float, bool]] = {}
+_MD_DIR_CACHE_TTL = 30.0  # seconds — markdown files rarely appear/disappear
+
+
+def clear_md_dir_cache() -> None:
+    """Flush the _dir_has_markdown cache."""
+    _md_dir_cache.clear()
+    logger.debug("Markdown-dir cache cleared")
 
 
 class FileSystemService:
@@ -73,15 +89,25 @@ class FileSystemService:
         """Check if a directory (recursively) contains any .md files.
 
         Stops as soon as one is found for speed.
-        Walks into hidden subdirectories as well.
+        Results are cached with a TTL to avoid repeated os.walk() calls.
         """
+        cache_key = str(dir_path)
+        now = time.monotonic()
+        cached = _md_dir_cache.get(cache_key)
+        if cached is not None:
+            ts, result = cached
+            if now - ts < _MD_DIR_CACHE_TTL:
+                return result
+
         try:
             for _dirpath, _dirnames, filenames in os.walk(dir_path):
                 for fname in filenames:
                     if fname.lower().endswith(".md"):
+                        _md_dir_cache[cache_key] = (now, True)
                         return True
         except OSError:
             pass
+        _md_dir_cache[cache_key] = (now, False)
         return False
 
     @timed("fs", "list_directory")

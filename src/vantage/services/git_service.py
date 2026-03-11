@@ -21,7 +21,13 @@ logger = logging.getLogger(__name__)
 # (repo_path, limit, extensions_tuple).  Shared across GitService
 # instances so multiple tabs hitting the same repo benefit.
 _recent_files_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
-_RECENT_FILES_TTL = 2.0  # seconds
+_RECENT_FILES_TTL = 10.0  # seconds — long enough to survive multi-tab storms
+
+# TTL cache for git status results.  Keyed by repo_path string.
+# This is the single biggest perf win: git status -uall is ~4.5s on
+# large repos and was being called 80+ times with no caching.
+_status_cache: dict[str, tuple[float, dict[str, str]]] = {}
+_STATUS_CACHE_TTL = 3.0  # seconds
 
 
 def clear_recent_files_cache() -> None:
@@ -32,6 +38,16 @@ def clear_recent_files_cache() -> None:
     """
     _recent_files_cache.clear()
     logger.debug("Recent-files cache cleared")
+
+
+def clear_status_cache() -> None:
+    """Flush the git-status cache.
+
+    Called by the file watcher alongside ``clear_recent_files_cache``
+    so that the next ``get_working_dir_status`` call returns fresh data.
+    """
+    _status_cache.clear()
+    logger.debug("Git-status cache cleared")
 
 
 class GitService:
@@ -220,9 +236,22 @@ class GitService:
 
         Returns a dict mapping relative-to-repo_path file paths to a status
         string: 'modified', 'added', 'deleted', or 'untracked'.
+
+        Results are cached with a short TTL.  This is the single biggest
+        performance win: ``git status -uall`` costs ~4.5 s on large repos
+        and was previously called 80+ times per page load with no caching.
         """
         if not self.repo or not self.repo.working_dir:
             return {}
+
+        cache_key = str(self.repo_path)
+        now = time.monotonic()
+        cached = _status_cache.get(cache_key)
+        if cached is not None:
+            ts, data = cached
+            if now - ts < _STATUS_CACHE_TTL:
+                logger.debug("git-status cache hit (age=%.1fs, entries=%d)", now - ts, len(data))
+                return data
 
         result: dict[str, str] = {}
         try:
@@ -264,6 +293,7 @@ class GitService:
         except Exception:
             pass
 
+        _status_cache[cache_key] = (now, result)
         return result
 
     def _find_intent_to_add_files(self, status_output: str | None = None) -> set[str]:
@@ -685,7 +715,15 @@ class GitService:
         def _walk_subdir(dir_path: str) -> list[dict[str, Any]]:
             found: list[dict[str, Any]] = []
             repo_root = self.repo_path
+            root_depth = dir_path.count(os.sep)
+            max_depth = 8  # don't descend more than 8 levels from top dir
             for dirpath, dirnames, filenames in os.walk(dir_path):
+                # Prune depth — avoids scanning enormous nested trees
+                # like GroundTruthBlobEx2 with 100K+ files
+                cur_depth = dirpath.count(os.sep) - root_depth
+                if cur_depth >= max_depth:
+                    dirnames.clear()
+                    continue
                 dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in exclude]
                 for fname in filenames:
                     if not _matches_ext(fname):
@@ -719,9 +757,10 @@ class GitService:
                     [
                         "git",
                         "log",
-                        "--max-count=200",
+                        "--max-count=50",
                         "--format=%H%x00%an%x00%ct%x00%s",
                         "--name-only",
+                        "--diff-filter=ACDMR",
                     ],
                     capture_output=True,
                     text=True,
