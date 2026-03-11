@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     exclude_dirs: frozenset[str] = DEFAULT_EXCLUDE_DIRS
     # Show hidden files/directories (starting with .) in the sidebar
     show_hidden: bool = True
+    # Performance tuning for large repos (defaults: no limits)
+    walk_max_depth: int | None = None  # max directory depth for untracked file discovery
+    walk_timeout: float = 30.0  # timeout in seconds for git ls-files subprocess
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -39,6 +42,8 @@ def set_daemon_config(config: DaemonConfig):
         multi_repo=True,
         exclude_dirs=config.exclude_dirs,
         show_hidden=config.show_hidden,
+        walk_max_depth=config.walk_max_depth,
+        walk_timeout=config.walk_timeout,
     )
 
 

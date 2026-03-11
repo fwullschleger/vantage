@@ -90,8 +90,10 @@ class FileSystemService:
 
         Stops as soon as one is found for speed.
         Results are cached with a TTL to avoid repeated os.walk() calls.
-        Limits depth to 5 levels to avoid scanning enormous nested trees.
+        Respects the walk_max_depth setting when configured.
         """
+        from vantage.settings import settings
+
         cache_key = str(dir_path)
         now = time.monotonic()
         cached = _md_dir_cache.get(cache_key)
@@ -100,11 +102,11 @@ class FileSystemService:
             if now - ts < _MD_DIR_CACHE_TTL:
                 return result
 
-        root_depth = str(dir_path).count(os.sep)
-        max_depth = 5
+        max_depth = settings.walk_max_depth
+        root_depth = str(dir_path).count(os.sep) if max_depth is not None else 0
         try:
             for dirpath, dirnames, filenames in os.walk(dir_path):
-                if dirpath.count(os.sep) - root_depth >= max_depth:
+                if max_depth is not None and dirpath.count(os.sep) - root_depth >= max_depth:
                     dirnames.clear()
                     continue
                 for fname in filenames:

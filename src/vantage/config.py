@@ -59,6 +59,8 @@ class DaemonConfig:
     port: int = 8000
     exclude_dirs: frozenset[str] = DEFAULT_EXCLUDE_DIRS
     show_hidden: bool = True
+    walk_max_depth: int | None = None
+    walk_timeout: float = 30.0
 
     @classmethod
     def from_file(cls, config_path: Path | None = None) -> "DaemonConfig":
@@ -92,6 +94,8 @@ class DaemonConfig:
             port=data.get("port", 8000),
             exclude_dirs=exclude_dirs,
             show_hidden=data.get("show_hidden", True),
+            walk_max_depth=data.get("walk_max_depth"),
+            walk_timeout=data.get("walk_timeout", 30.0),
         )
 
     def validate(self) -> list[str]:
@@ -156,6 +160,16 @@ port = 8000
 #
 # To override the defaults with your own list:
 # exclude_dirs = ["node_modules", ".venv", "vendor"]
+
+# Performance tuning for very large repos.
+# walk_max_depth: limit how deep to scan for untracked markdown files.
+#   Default: no limit (all depths scanned).
+#   Set to e.g. 5 if repos have enormous deeply-nested non-markdown trees.
+# walk_max_depth = 5
+#
+# walk_timeout: timeout in seconds for the git ls-files subprocess that
+#   discovers untracked files. Default: 30 seconds.
+# walk_timeout = 30.0
 
 # Repositories to serve
 # Each repo needs a unique name (used in URLs) and a path to the directory.

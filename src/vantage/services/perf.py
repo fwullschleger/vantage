@@ -6,6 +6,7 @@ Data is stored in an in-memory ring buffer for diagnostics export.
 
 from __future__ import annotations
 
+import datetime
 import functools
 import logging
 import os
@@ -22,19 +23,28 @@ logger = logging.getLogger(__name__)
 
 
 def _get_git_sha() -> str:
-    """Return the short git SHA of the running code, or 'unknown'."""
-    try:
-        proc = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-        )
-        if proc.returncode == 0:
-            return proc.stdout.strip()
-    except Exception:
-        pass
+    """Return the short git SHA of the running code, or 'unknown'.
+
+    Tries the package source dir first, then common workspace locations.
+    When installed as a uv tool, __file__ lives outside any git repo,
+    so we also try the current working directory.
+    """
+    for cwd in [
+        os.path.dirname(os.path.abspath(__file__)),
+        os.getcwd(),
+    ]:
+        try:
+            proc = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                cwd=cwd,
+            )
+            if proc.returncode == 0 and proc.stdout.strip():
+                return proc.stdout.strip()
+        except Exception:
+            continue
     return "unknown"
 
 
@@ -194,6 +204,7 @@ class PerfStore:
             "meta": {
                 "app_version": APP_VERSION,
                 "git_sha": GIT_SHA,
+                "collected_at": datetime.datetime.now(datetime.UTC).isoformat(),
                 "uptime_s": round(time.time() - _STARTUP_TIME, 1),
                 "buffer_size": buf_size,
                 "buffer_max": self._records.maxlen,

@@ -14,6 +14,7 @@ from git import Repo
 
 from vantage.schemas.models import DiffHunk, DiffLine, FileDiff, GitCommit
 from vantage.services.perf import timed
+from vantage.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 # (repo_path, limit, extensions_tuple).  Shared across GitService
 # instances so multiple tabs hitting the same repo benefit.
 _recent_files_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
-_RECENT_FILES_TTL = 10.0  # seconds — long enough to survive multi-tab storms
+_RECENT_FILES_TTL = 30.0  # seconds — most expensive call, staleness is acceptable
 
 # TTL cache for git status results.  Keyed by repo_path string.
 # This is the single biggest perf win: git status -uall is ~4.5s on
@@ -617,13 +618,12 @@ class GitService:
 
         Performance
         -----------
-        * Untracked-file discovery uses a **parallel directory walk**
-          (one thread per top-level subdirectory) cross-referenced against
-          the tracked-file set from ``git ls-files`` (~14 ms).  This
-          replaces the much slower ``git ls-files --others`` (~230 ms on
-          large repos) and scales linearly with the number of non-excluded
-          directories rather than the total tree size.
-        * ``git log``, ``git status``, and directory walks all run
+        * Untracked-file discovery uses ``git ls-files --others`` which
+          delegates the directory walk to git's optimized C implementation.
+          This is dramatically faster than Python's ``os.walk`` on large
+          repos (100K+ files) since git respects ``.gitignore`` natively
+          and avoids per-file Python overhead.
+        * ``git log``, ``git status``, and untracked-file listing all run
           concurrently in a single ``ThreadPoolExecutor`` so wall-clock
           time ≈ max(individual tasks).
         * File-existence and mtime checks use a single ``os.stat()``
@@ -675,87 +675,39 @@ class GitService:
 
         working_dir = self.repo.working_dir
 
-        # ------------------------------------------------------------------
-        # Step 1 (fast, ~14 ms): build set of tracked files so we can
-        # identify untracked files during the parallel walk without the
-        # expensive ``git ls-files --others`` command.
-        # ------------------------------------------------------------------
-        tracked = self._build_tracked_set()
+        # Extension globs for git ls-files (e.g. ['*.md', '*.markdown'])
+        ext_globs = [f"*{e}" for e in ext_lower]
 
         # ------------------------------------------------------------------
-        # Step 2: identify non-excluded top-level directories to walk and
-        # collect any top-level untracked files.
+        # Worker: git ls-files --others to find untracked files.
+        # Delegates the directory walk to git's optimized C implementation
+        # which respects .gitignore natively and is dramatically faster
+        # than Python's os.walk on large repos (100K+ files).
         # ------------------------------------------------------------------
-        top_dirs: list[str] = []
-        top_untracked: list[dict[str, Any]] = []
-        try:
-            for entry in os.scandir(self.repo_path):
-                if entry.is_dir(follow_symlinks=False):
-                    if entry.name.startswith(".") or entry.name in exclude:
-                        continue
-                    top_dirs.append(entry.path)
-                elif entry.is_file(follow_symlinks=True) and _matches_ext(entry.name):
-                    if entry.name not in tracked:
-                        try:
-                            st = entry.stat()
-                            top_untracked.append(
-                                {
-                                    "path": entry.name,
-                                    "date": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                                    "author_name": "",
-                                    "message": "",
-                                    "hexsha": "",
-                                    "untracked": True,
-                                }
-                            )
-                        except OSError:
-                            continue
-        except OSError:
-            pass
+        def _git_ls_untracked() -> str:
+            timeout = settings.walk_timeout
+            with contextlib.suppress(Exception):
+                cmd = [
+                    "git",
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "--",
+                    *ext_globs,
+                ]
+                proc = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    cwd=working_dir,
+                    timeout=timeout,
+                )
+                if proc.returncode == 0:
+                    return proc.stdout
+            return ""
 
         # ------------------------------------------------------------------
-        # Worker: walk a single top-level directory for untracked files
-        # matching *extensions*.  Each runs on its own thread so I/O is
-        # overlapped across directories.
-        # ------------------------------------------------------------------
-        def _walk_subdir(dir_path: str) -> list[dict[str, Any]]:
-            found: list[dict[str, Any]] = []
-            repo_root = self.repo_path
-            root_depth = dir_path.count(os.sep)
-            max_depth = 8  # don't descend more than 8 levels from top dir
-            for dirpath, dirnames, filenames in os.walk(dir_path):
-                # Prune depth — avoids scanning enormous nested trees
-                # like GroundTruthBlobEx2 with 100K+ files
-                cur_depth = dirpath.count(os.sep) - root_depth
-                if cur_depth >= max_depth:
-                    dirnames.clear()
-                    continue
-                dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in exclude]
-                for fname in filenames:
-                    if not _matches_ext(fname):
-                        continue
-                    full = os.path.join(dirpath, fname)
-                    rel = os.path.relpath(full, repo_root)
-                    if rel in tracked:
-                        continue
-                    try:
-                        mtime = os.stat(full).st_mtime
-                        found.append(
-                            {
-                                "path": rel,
-                                "date": datetime.fromtimestamp(mtime).isoformat(),
-                                "author_name": "",
-                                "message": "",
-                                "hexsha": "",
-                                "untracked": True,
-                            }
-                        )
-                    except OSError:
-                        continue
-            return found
-
-        # ------------------------------------------------------------------
-        # Git helpers executed in the same thread pool as the walks.
+        # Git helpers executed in the thread pool.
         # ------------------------------------------------------------------
         def _git_log() -> str:
             with contextlib.suppress(Exception):
@@ -791,26 +743,55 @@ class GitService:
             return ""
 
         # ------------------------------------------------------------------
-        # Step 3: run git log, git status, and all directory walks
-        # concurrently in one pool.  git commands are submitted first so
-        # they start immediately; walk tasks fill remaining workers.
+        # Step 1: run git log, git status, and untracked file listing
+        # concurrently.  All three are git subprocess calls, so 3 workers.
         # ------------------------------------------------------------------
-        num_workers = max(4, min(12, 2 + len(top_dirs)))
-        with ThreadPoolExecutor(max_workers=num_workers) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:
             fut_log = pool.submit(_git_log)
             fut_ita = pool.submit(_git_status_ita)
-            walk_futs = [pool.submit(_walk_subdir, d) for d in top_dirs]
+            fut_untracked = pool.submit(_git_ls_untracked)
 
-            log_output = fut_log.result()
-            status_output = fut_ita.result()
-
-            walk_results: list[dict[str, Any]] = list(top_untracked)
-            for fut in walk_futs:
-                with contextlib.suppress(Exception):
-                    walk_results.extend(fut.result())
+            log_output = fut_log.result(timeout=15)
+            status_output = fut_ita.result(timeout=15)
+            untracked_output = fut_untracked.result(timeout=settings.walk_timeout + 5)
 
         # ------------------------------------------------------------------
-        # Step 4: merge untracked walk results + ITA + tracked git-log
+        # Step 2: process untracked files from git ls-files output
+        # ------------------------------------------------------------------
+        walk_results: list[dict[str, Any]] = []
+        max_depth = settings.walk_max_depth
+        for line in untracked_output.splitlines():
+            rel_path = line.strip()
+            if not rel_path:
+                continue
+            if should_skip(rel_path):
+                continue
+            parts = rel_path.split("/")
+            if any(p.startswith(".") for p in parts[:-1]):
+                continue
+            # Apply optional depth limit
+            if max_depth is not None and len(parts) - 1 > max_depth:
+                continue
+            try:
+                full = self.repo_path / rel_path
+                st = full.stat()
+                if not stat_module.S_ISREG(st.st_mode):
+                    continue
+                walk_results.append(
+                    {
+                        "path": rel_path,
+                        "date": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                        "author_name": "",
+                        "message": "",
+                        "hexsha": "",
+                        "untracked": True,
+                    }
+                )
+            except OSError:
+                continue
+
+        # ------------------------------------------------------------------
+        # Step 3: merge untracked files + ITA + tracked git-log
         # ------------------------------------------------------------------
         results: list[dict[str, Any]] = list(walk_results)
         seen_paths: set[str] = {r["path"] for r in results}
@@ -902,37 +883,55 @@ class GitService:
 
         # ------------------------------------------------------------------
         # Step 5: catch staged-but-never-committed files.
-        # These are in the tracked set (from ``git ls-files``) but were
-        # skipped by the walk (they're tracked) and have no git log entry.
-        # Show them as untracked since they have no commit history yet.
+        # Uses ``git diff --cached --name-only`` which returns ONLY files
+        # in the staging area — O(staged files), not O(all tracked files).
         # ------------------------------------------------------------------
-        for tracked_path in tracked:
-            if tracked_path in seen_paths:
-                continue
-            if not _matches_ext(tracked_path):
-                continue
-            if should_skip(tracked_path):
-                continue
-            parts = tracked_path.split("/")
-            if any(p.startswith(".") for p in parts[:-1]):
-                continue
-            try:
-                st = (self.repo_path / tracked_path).stat()
-                if not stat_module.S_ISREG(st.st_mode):
-                    continue
-                results.append(
-                    {
-                        "path": tracked_path,
-                        "date": datetime.fromtimestamp(st.st_mtime).isoformat(),
-                        "author_name": "",
-                        "message": "",
-                        "hexsha": "",
-                        "untracked": True,
-                    }
-                )
-                seen_paths.add(tracked_path)
-            except OSError:
-                continue
+        try:
+            staged_proc = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                capture_output=True,
+                text=True,
+                cwd=working_dir,
+                timeout=5,
+            )
+            if staged_proc.returncode == 0:
+                for staged_file in staged_proc.stdout.splitlines():
+                    staged_file = staged_file.strip()
+                    if not staged_file:
+                        continue
+                    full_path = Path(working_dir) / staged_file
+                    try:
+                        rel_path = str(full_path.relative_to(self.repo_path))
+                    except ValueError:
+                        continue
+                    if rel_path in seen_paths:
+                        continue
+                    if not _matches_ext(rel_path):
+                        continue
+                    if should_skip(rel_path):
+                        continue
+                    parts = rel_path.split("/")
+                    if any(p.startswith(".") for p in parts[:-1]):
+                        continue
+                    try:
+                        st = full_path.stat()
+                        if not stat_module.S_ISREG(st.st_mode):
+                            continue
+                        results.append(
+                            {
+                                "path": rel_path,
+                                "date": datetime.fromtimestamp(st.st_mtime).isoformat(),
+                                "author_name": "",
+                                "message": "",
+                                "hexsha": "",
+                                "untracked": True,
+                            }
+                        )
+                        seen_paths.add(rel_path)
+                    except OSError:
+                        continue
+        except Exception:
+            logger.debug("Failed to check staged files", exc_info=True)
 
         # Sort all results strictly by date descending, then trim to limit
         results.sort(key=lambda r: r["date"], reverse=True)
