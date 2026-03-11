@@ -1,3 +1,6 @@
+import asyncio
+from functools import partial
+
 from fastapi import APIRouter, HTTPException
 
 from vantage.schemas.models import (
@@ -118,8 +121,11 @@ async def list_repos():
 @router.get("/r/{repo}/tree", response_model=list[FileNode])
 async def get_tree_multi(repo: str, path: str = ".", include_git: bool = False):
     fs = get_fs_service(repo)
+    loop = asyncio.get_running_loop()
     try:
-        return fs.list_directory(path, include_git=include_git)
+        return await loop.run_in_executor(
+            None, partial(fs.list_directory, path, include_git=include_git)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
@@ -142,9 +148,14 @@ async def get_history_multi(repo: str, path: str):
 @router.get("/r/{repo}/git/status", response_model=FileStatus)
 async def get_status_multi(repo: str, path: str):
     git = get_git_service(repo)
-    commit = git.get_last_commit(path)
-    wd_status = git.get_working_dir_status()
-    return FileStatus(last_commit=commit, git_status=wd_status.get(path))
+    loop = asyncio.get_running_loop()
+
+    def _get_status() -> FileStatus:
+        commit = git.get_last_commit(path)
+        wd_status = git.get_working_dir_status()
+        return FileStatus(last_commit=commit, git_status=wd_status.get(path))
+
+    return await loop.run_in_executor(None, _get_status)
 
 
 def _validate_commit_sha(sha: str) -> None:
@@ -177,7 +188,9 @@ async def get_working_diff_multi(repo: str, path: str):
 @router.get("/r/{repo}/git/recent")
 async def get_recent_files_multi(repo: str, limit: int = 10):
     git = get_git_service(repo)
-    return git.get_recently_changed_files(limit=limit)
+    limit = min(max(limit, 1), 1000)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(git.get_recently_changed_files, limit=limit))
 
 
 @router.get("/r/{repo}/info")
@@ -223,8 +236,11 @@ def _require_single_repo_mode() -> None:
 async def get_tree(path: str = ".", include_git: bool = False):
     _require_single_repo_mode()
     fs = get_fs_service()
+    loop = asyncio.get_running_loop()
     try:
-        return fs.list_directory(path, include_git=include_git)
+        return await loop.run_in_executor(
+            None, partial(fs.list_directory, path, include_git=include_git)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 
@@ -250,9 +266,14 @@ async def get_history(path: str):
 async def get_status(path: str):
     _require_single_repo_mode()
     git = get_git_service()
-    commit = git.get_last_commit(path)
-    wd_status = git.get_working_dir_status()
-    return FileStatus(last_commit=commit, git_status=wd_status.get(path))
+    loop = asyncio.get_running_loop()
+
+    def _get_status() -> FileStatus:
+        commit = git.get_last_commit(path)
+        wd_status = git.get_working_dir_status()
+        return FileStatus(last_commit=commit, git_status=wd_status.get(path))
+
+    return await loop.run_in_executor(None, _get_status)
 
 
 @router.get("/git/diff", response_model=FileDiff)
@@ -281,7 +302,8 @@ async def get_recent_files(limit: int = 10):
     _require_single_repo_mode()
     limit = min(max(limit, 1), 1000)
     git = get_git_service()
-    return git.get_recently_changed_files(limit=limit)
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(git.get_recently_changed_files, limit=limit))
 
 
 @router.get("/info")
