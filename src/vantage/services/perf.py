@@ -9,6 +9,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+import subprocess
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
@@ -18,6 +19,39 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
+
+
+def _get_git_sha() -> str:
+    """Return the short git SHA of the running code, or 'unknown'."""
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        if proc.returncode == 0:
+            return proc.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _get_app_version() -> str:
+    """Return the app version from pyproject.toml metadata."""
+    try:
+        from importlib.metadata import version
+
+        return version("vantage")
+    except Exception:
+        return "dev"
+
+
+# Computed once at import time
+APP_VERSION = _get_app_version()
+GIT_SHA = _get_git_sha()
+_STARTUP_TIME = time.time()
 
 # ---------------------------------------------------------------------------
 # Ring buffer for timing records
@@ -158,6 +192,9 @@ class PerfStore:
             },
             "slow_requests": slow,
             "meta": {
+                "app_version": APP_VERSION,
+                "git_sha": GIT_SHA,
+                "uptime_s": round(time.time() - _STARTUP_TIME, 1),
                 "buffer_size": buf_size,
                 "buffer_max": self._records.maxlen,
                 "build_ms": round((t4 - t0) * 1000, 1),
