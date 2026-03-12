@@ -228,6 +228,12 @@ vantage-docker daemon
 # Start with a custom config
 vantage-docker daemon -c /path/to/config.toml
 
+# Start on a specific port
+vantage-docker daemon -p 3000
+
+# Rebuild image before starting
+vantage-docker daemon --build
+
 # Stop the daemon
 vantage-docker daemon-down
 ```
@@ -289,6 +295,8 @@ VANTAGE_DOCS=~/notes docker compose up
 # Daemon mode (requires config.toml and override for repo volumes)
 docker compose --profile daemon up
 ```
+
+All commands that start or restart a container (`up`, `daemon`, `add`) block until the UI is fully available, showing a spinner while waiting. Once ready, the command prints the URL and exits.
 
 Files are mounted read-only into the container. Edits on the host are detected automatically and the browser refreshes via WebSocket — no manual reload needed.
 
