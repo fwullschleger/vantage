@@ -17,11 +17,13 @@ interface EditorState {
   isSaving: boolean;
   lastSaveTimestamp: number;
   externalChangeDetected: boolean;
+  splitPreview: boolean;
 
   enterEditMode: () => void;
   exitEditMode: () => void;
   setDirty: (dirty: boolean) => void;
   setExternalChangeDetected: (detected: boolean) => void;
+  setSplitPreview: (splitPreview: boolean) => void;
   saveFile: (path: string, content: string) => Promise<boolean>;
 }
 
@@ -31,15 +33,28 @@ export const useEditorStore = create<EditorState>((set) => ({
   isSaving: false,
   lastSaveTimestamp: 0,
   externalChangeDetected: false,
+  splitPreview: (() => {
+    try {
+      return localStorage.getItem("vantage:splitPreview") === "true";
+    } catch {
+      return false;
+    }
+  })(),
 
   enterEditMode: () =>
-    set({ isEditing: true, isDirty: false, externalChangeDetected: false }),
+    set({
+      isEditing: true,
+      isDirty: false,
+      lastSaveTimestamp: 0,
+      externalChangeDetected: false,
+    }),
 
   exitEditMode: () =>
     set({
       isEditing: false,
       isDirty: false,
       isSaving: false,
+      lastSaveTimestamp: 0,
       externalChangeDetected: false,
     }),
 
@@ -47,6 +62,15 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   setExternalChangeDetected: (detected) =>
     set({ externalChangeDetected: detected }),
+
+  setSplitPreview: (splitPreview) => {
+    try {
+      localStorage.setItem("vantage:splitPreview", String(splitPreview));
+    } catch {
+      /* ignore */
+    }
+    set({ splitPreview });
+  },
 
   saveFile: async (path: string, content: string) => {
     const apiBase = getApiBase();
