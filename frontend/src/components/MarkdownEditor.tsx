@@ -10,12 +10,16 @@ import {
   defaultHighlightStyle,
   bracketMatching,
 } from "@codemirror/language";
-import { Save, X, Loader2, AlertTriangle } from "lucide-react";
+import { Save, Loader2, AlertTriangle, Columns2 } from "lucide-react";
+import { cn } from "../lib/utils";
+import { useEditorStore } from "../stores/useEditorStore";
 
-interface MarkdownEditorProps {
+export interface MarkdownEditorProps {
   initialContent: string;
+  dirtyBaselineContent?: string;
   onSave: (content: string) => Promise<void>;
-  onCancel: () => void;
+  onClose: () => void;
+  onContentChange?: (content: string) => void;
   isSaving: boolean;
   isDirty: boolean;
   onDirtyChange: (dirty: boolean) => void;
@@ -26,8 +30,10 @@ interface MarkdownEditorProps {
 
 export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   initialContent,
+  dirtyBaselineContent = initialContent,
   onSave,
-  onCancel,
+  onClose,
+  onContentChange,
   isSaving,
   isDirty,
   onDirtyChange,
@@ -35,9 +41,35 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   onReload,
   onDismissExternalChange,
 }) => {
+  const splitPreview = useEditorStore((state) => state.splitPreview);
+  const setSplitPreview = useEditorStore((state) => state.setSplitPreview);
   const containerRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
-  const initialContentRef = useRef(initialContent);
+  const dirtyBaselineRef = useRef(dirtyBaselineContent);
+  const onSaveRef = useRef(onSave);
+  const onCloseRef = useRef(onClose);
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  const onContentChangeRef = useRef(onContentChange);
+
+  useEffect(() => {
+    dirtyBaselineRef.current = dirtyBaselineContent;
+  }, [dirtyBaselineContent]);
+
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    onDirtyChangeRef.current = onDirtyChange;
+  }, [onDirtyChange]);
+
+  useEffect(() => {
+    onContentChangeRef.current = onContentChange;
+  }, [onContentChange]);
 
   const getContent = useCallback(() => {
     return viewRef.current?.state.doc.toString() ?? initialContent;
@@ -45,8 +77,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
   const handleSave = useCallback(async () => {
     const content = getContent();
-    await onSave(content);
-  }, [getContent, onSave]);
+    await onSaveRef.current(content);
+  }, [getContent]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -64,7 +96,7 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       {
         key: "Escape",
         run: () => {
-          onCancel();
+          onCloseRef.current();
           return true;
         },
       },
@@ -73,7 +105,8 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
     const updateListener = EditorView.updateListener.of((update) => {
       if (update.docChanged) {
         const content = update.state.doc.toString();
-        onDirtyChange(content !== initialContentRef.current);
+        onDirtyChangeRef.current(content !== dirtyBaselineRef.current);
+        onContentChangeRef.current?.(content);
       }
     });
 
@@ -127,6 +160,20 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setSplitPreview(!splitPreview)}
+            aria-pressed={splitPreview}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border transition-colors",
+              splitPreview
+                ? "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700",
+            )}
+            title={splitPreview ? "Hide live split preview" : "Show live split preview"}
+          >
+            <Columns2 size={14} />
+            Preview
+          </button>
+          <button
             onClick={handleSave}
             disabled={isSaving || !isDirty}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
@@ -137,13 +184,6 @@ export const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
               <Save size={14} />
             )}
             {isSaving ? "Saving..." : "Save"}
-          </button>
-          <button
-            onClick={onCancel}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-200 dark:bg-slate-700 rounded-md hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
-          >
-            <X size={14} />
-            Cancel
           </button>
         </div>
       </div>

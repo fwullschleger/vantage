@@ -48,6 +48,12 @@ const MarkdownEditor = lazy(() =>
   })),
 );
 
+const SplitEditorView = lazy(() =>
+  import("../components/SplitEditorView").then((m) => ({
+    default: m.SplitEditorView,
+  })),
+);
+
 /** Format an ISO date string as a short local datetime (e.g. "Mar 2, 2026 3:45 PM"). */
 function formatDateTime(dateStr: string): string {
   try {
@@ -114,6 +120,8 @@ export const ViewerPage: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [editorContent, setEditorContent] = useState("");
+  const [editorSavedContent, setEditorSavedContent] = useState("");
   const [keyboardShortcutsEnabled, setKeyboardShortcutsEnabled] =
     useState<boolean>(() => {
       try {
@@ -129,7 +137,9 @@ export const ViewerPage: React.FC = () => {
     isEditing,
     isDirty,
     isSaving,
+    lastSaveTimestamp,
     externalChangeDetected,
+    splitPreview,
     enterEditMode,
     exitEditMode,
     setDirty,
@@ -145,6 +155,12 @@ export const ViewerPage: React.FC = () => {
   }, [latestCommit, currentPath, recentFiles]);
 
   useWebSocket();
+
+  useEffect(() => {
+    if (!fileContent || fileContent.encoding === "binary" || isEditing) return;
+    setEditorContent(fileContent.content);
+    setEditorSavedContent(fileContent.content);
+  }, [fileContent, isEditing]);
 
   // Helper to get API base
   const getApiBase = useCallback((): string => {
@@ -428,25 +444,49 @@ export const ViewerPage: React.FC = () => {
     }
   };
 
-  // Edit mode handlers
-  const handleEnterEdit = useCallback(() => {
-    if (isStaticMode() || !currentPath?.toLowerCase().endsWith(".md")) return;
-    if (fileContent?.encoding === "binary") return;
-    setShowRaw(false);
-    enterEditMode();
-  }, [currentPath, fileContent, enterEditMode]);
-
-  const handleCancelEdit = useCallback(() => {
-    if (isDirty) {
-      if (!window.confirm("You have unsaved changes. Discard them?")) return;
+  // Edit mode toggle (like raw mode)
+  const handleToggleEdit = useCallback(() => {
+    if (isEditing) {
+      if (isDirty) {
+        if (!window.confirm("You have unsaved changes. Discard them?")) return;
+      }
+      const wasSaved = lastSaveTimestamp > 0;
+      exitEditMode();
+      if (wasSaved && currentPath) {
+        loadFile(currentPath);
+      }
+    } else {
+      if (isStaticMode() || !currentPath?.toLowerCase().endsWith(".md")) return;
+      if (!fileContent) return;
+      if (fileContent?.encoding === "binary") return;
+      setShowRaw(false);
+      setEditorContent(fileContent.content);
+      setEditorSavedContent(fileContent.content);
+      enterEditMode();
     }
-    exitEditMode();
-  }, [isDirty, exitEditMode]);
+  }, [
+    isEditing,
+    isDirty,
+    lastSaveTimestamp,
+    exitEditMode,
+    currentPath,
+    loadFile,
+    fileContent,
+    enterEditMode,
+  ]);
+
+  const handleEditorContentChange = useCallback((content: string) => {
+    setEditorContent(content);
+  }, []);
 
   const handleSaveEdit = useCallback(
     async (content: string) => {
       if (!currentPath) return;
-      await saveFile(currentPath, content);
+      const saved = await saveFile(currentPath, content);
+      if (saved) {
+        setEditorContent(content);
+        setEditorSavedContent(content);
+      }
     },
     [currentPath, saveFile],
   );
@@ -522,7 +562,7 @@ export const ViewerPage: React.FC = () => {
     onNavigate: handleShortcutNavigate,
     onViewDiff: handleViewDiff,
     onViewHistory: handleViewHistory,
-    onEnterEditMode: handleEnterEdit,
+    onEnterEditMode: handleToggleEdit,
     contentScrollRef: contentRef,
     isMultiRepo,
     currentRepo,
@@ -595,8 +635,6 @@ export const ViewerPage: React.FC = () => {
   useEffect(() => {
     loadRepos();
   }, [loadRepos]);
-
-  useWebSocket();
 
   // Close sidebar on mobile when navigating to a new path
   useEffect(() => {
@@ -906,14 +944,19 @@ export const ViewerPage: React.FC = () => {
                   <span className="hidden sm:inline">{showRaw ? "Rendered" : "Raw"}</span>
                 </button>
               )}
-              {currentPath && currentPath.toLowerCase().endsWith(".md") && !isStaticMode() && !isEditing && (
+              {currentPath && currentPath.toLowerCase().endsWith(".md") && !isStaticMode() && (
                 <button
-                  onClick={handleEnterEdit}
-                  className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg px-2 py-1.5 transition-colors cursor-pointer"
-                  title="Edit file (e)"
+                  onClick={handleToggleEdit}
+                  className={cn(
+                    "flex items-center space-x-1.5 text-xs rounded-lg px-2 py-1.5 transition-colors cursor-pointer",
+                    isEditing
+                      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30"
+                      : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                  )}
+                  title={isEditing ? "Exit edit mode (Esc)" : "Edit file (e)"}
                 >
                   <Pencil size={14} />
-                  <span className="hidden sm:inline">Edit</span>
+                  <span className="hidden sm:inline">{isEditing ? "Editing" : "Edit"}</span>
                 </button>
               )}
             </div>
@@ -957,14 +1000,19 @@ export const ViewerPage: React.FC = () => {
                   <span className="hidden sm:inline">{showRaw ? "Rendered" : "Raw"}</span>
                 </button>
               )}
-              {!isStaticMode() && !isEditing && (
+              {!isStaticMode() && (
                 <button
-                  onClick={handleEnterEdit}
-                  className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg px-2 py-1.5 transition-colors cursor-pointer"
-                  title="Edit file (e)"
+                  onClick={handleToggleEdit}
+                  className={cn(
+                    "flex items-center space-x-1.5 text-xs rounded-lg px-2 py-1.5 transition-colors cursor-pointer",
+                    isEditing
+                      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30"
+                      : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                  )}
+                  title={isEditing ? "Exit edit mode (Esc)" : "Edit file (e)"}
                 >
                   <Pencil size={14} />
-                  <span className="hidden sm:inline">Edit</span>
+                  <span className="hidden sm:inline">{isEditing ? "Editing" : "Edit"}</span>
                 </button>
               )}
             </div>
@@ -975,9 +1023,17 @@ export const ViewerPage: React.FC = () => {
         <div
           ref={contentRef}
           data-content-scroll
-          className="flex-1 overflow-y-auto bg-white dark:bg-slate-900"
+          className={cn(
+            "flex-1 bg-white dark:bg-slate-900",
+            isEditing && splitPreview ? "overflow-hidden" : "overflow-y-auto",
+          )}
         >
-          <div className="max-w-5xl mx-auto py-4 px-4 sm:py-6 sm:px-8">
+          <div
+            className={cn(
+              "mx-auto px-4 py-4 sm:px-8 sm:py-6",
+              isEditing && splitPreview ? "h-full max-w-none" : "max-w-5xl",
+            )}
+          >
             {error ? (
               <div className="flex flex-col items-center justify-center h-64 text-red-500">
                 <div className="w-16 h-16 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center mb-4">
@@ -1020,17 +1076,36 @@ export const ViewerPage: React.FC = () => {
                   </div>
                 }
               >
-                <MarkdownEditor
-                  initialContent={fileContent.content}
-                  onSave={handleSaveEdit}
-                  onCancel={handleCancelEdit}
-                  isSaving={isSaving}
-                  isDirty={isDirty}
-                  onDirtyChange={setDirty}
-                  externalChangeDetected={externalChangeDetected}
-                  onReload={handleReloadEditor}
-                  onDismissExternalChange={() => setExternalChangeDetected(false)}
-                />
+                {splitPreview ? (
+                  <SplitEditorView
+                    initialContent={editorContent}
+                    dirtyBaselineContent={editorSavedContent}
+                    currentPath={fileContent.path}
+                    onSave={handleSaveEdit}
+                    onClose={handleToggleEdit}
+                    onContentChange={handleEditorContentChange}
+                    isSaving={isSaving}
+                    isDirty={isDirty}
+                    onDirtyChange={setDirty}
+                    externalChangeDetected={externalChangeDetected}
+                    onReload={handleReloadEditor}
+                    onDismissExternalChange={() => setExternalChangeDetected(false)}
+                  />
+                ) : (
+                  <MarkdownEditor
+                    initialContent={editorContent}
+                    dirtyBaselineContent={editorSavedContent}
+                    onSave={handleSaveEdit}
+                    onClose={handleToggleEdit}
+                    onContentChange={handleEditorContentChange}
+                    isSaving={isSaving}
+                    isDirty={isDirty}
+                    onDirtyChange={setDirty}
+                    externalChangeDetected={externalChangeDetected}
+                    onReload={handleReloadEditor}
+                    onDismissExternalChange={() => setExternalChangeDetected(false)}
+                  />
+                )}
               </Suspense>
               ) : (
               <div className="pb-8">
