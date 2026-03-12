@@ -25,6 +25,9 @@ Daemon mode (multi-repo):
     --build                Rebuild the image before starting
     -p PORT                Host port (default: 8000)
   daemon-down              Stop the daemon container
+  ls                       List configured repos from config file
+    -c CONFIG              Config file (default: ~/.config/vantage/config.toml)
+  ps                       Show all vantage Docker containers
   add [PATH]               Add a directory to daemon config and restart
     -n NAME                Custom repo name (default: directory basename)
   remove [PATH]            Remove a directory from daemon config and restart
@@ -620,6 +623,40 @@ cmd_remove() {
     restart_daemon_if_running
 }
 
+cmd_daemon_ls() {
+    local config_file="$DEFAULT_CONFIG"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -c) config_file="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) echo "Unknown argument: $1"; exit 1 ;;
+        esac
+    done
+
+    if [ ! -f "$config_file" ]; then
+        echo "No config found at $config_file"
+        exit 1
+    fi
+
+    python3 -c "
+import tomllib, os
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+repos = data.get('repos', [])
+if not repos:
+    print('No repos configured.')
+else:
+    for r in repos:
+        path = os.path.expanduser(r['path'])
+        print(f'  {r[\"name\"]}\t→ {path}')
+"
+}
+
+cmd_ps() {
+    docker ps -a --filter "name=vantage" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+}
+
 cmd_daemon_down() {
     if docker inspect "$DAEMON_CONTAINER" &>/dev/null; then
         echo "Stopping daemon..."
@@ -647,6 +684,8 @@ case "$command" in
     status)     cmd_status "$@" ;;
     daemon)     cmd_daemon "$@" ;;
     daemon-down) cmd_daemon_down "$@" ;;
+    ls)         cmd_daemon_ls "$@" ;;
+    ps)         cmd_ps "$@" ;;
     add)        cmd_add "$@" ;;
     remove)     cmd_remove "$@" ;;
     help|--help|-h) usage ;;
