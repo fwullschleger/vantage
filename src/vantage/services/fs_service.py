@@ -218,6 +218,28 @@ class FileSystemService:
         results.sort()
         return results
 
+    @timed("fs", "write_file")
+    def write_file(self, path: str, content: str) -> FileContent:
+        """Write content to an existing markdown file.
+
+        Only allows writing to .md files that already exist.
+        """
+        target_file = self.validate_path(path)
+
+        if not target_file.suffix.lower() == ".md":
+            raise ValueError("Only markdown (.md) files can be written")
+
+        if not target_file.is_file():
+            raise ValueError("File does not exist")
+
+        try:
+            with open(target_file, "w", encoding="utf-8") as f:
+                f.write(content)
+        except PermissionError:
+            raise ValueError("Permission denied") from None
+
+        return FileContent(path=path, content=content, encoding="utf-8")
+
     def read_file(self, path: str) -> FileContent:
         target_file = self.validate_path(path)
         if not target_file.is_file():

@@ -12,6 +12,7 @@ export const useKeyboardShortcuts = ({
   onNavigate,
   onViewDiff,
   onViewHistory,
+  onEnterEditMode,
   contentScrollRef,
   isMultiRepo,
   currentRepo,
@@ -22,6 +23,7 @@ export const useKeyboardShortcuts = ({
   onNavigate: (path: string) => void;
   onViewDiff: () => void;
   onViewHistory: () => void;
+  onEnterEditMode: () => void;
   contentScrollRef: React.RefObject<HTMLDivElement | null>;
   isMultiRepo: boolean;
   currentRepo: string | null;
@@ -149,6 +151,10 @@ export const useKeyboardShortcuts = ({
             }
           }
           break;
+        case "e":
+          e.preventDefault();
+          onEnterEditMode();
+          break;
         case "d":
           e.preventDefault();
           onViewDiff();
@@ -174,6 +180,7 @@ export const useKeyboardShortcuts = ({
     onNavigate,
     onViewDiff,
     onViewHistory,
+    onEnterEditMode,
     contentScrollRef,
     isMultiRepo,
     currentRepo,

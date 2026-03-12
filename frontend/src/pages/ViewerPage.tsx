@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import { useRepoStore } from "../stores/useRepoStore";
 import { useGitStore } from "../stores/useGitStore";
+import { useEditorStore } from "../stores/useEditorStore";
 import { FileTree } from "../components/FileTree";
 import { MarkdownViewer } from "../components/MarkdownViewer";
 import { DirectoryViewer } from "../components/DirectoryViewer";
@@ -25,6 +26,7 @@ import {
   Copy,
   Check,
   Github,
+  Pencil,
 } from "lucide-react";
 import { RelativeTime } from "../components/RelativeTime";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
@@ -39,6 +41,12 @@ import {
 } from "../components/KeyboardShortcuts";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { RecentsModal } from "../components/RecentsModal";
+
+const MarkdownEditor = lazy(() =>
+  import("../components/MarkdownEditor").then((m) => ({
+    default: m.MarkdownEditor,
+  })),
+);
 
 /** Format an ISO date string as a short local datetime (e.g. "Mar 2, 2026 3:45 PM"). */
 function formatDateTime(dateStr: string): string {
@@ -116,6 +124,18 @@ export const ViewerPage: React.FC = () => {
     });
   const { isLoading } = useRepoStore();
   const recentlyChangedPaths = useRepoStore((s) => s.recentlyChangedPaths);
+
+  const {
+    isEditing,
+    isDirty,
+    isSaving,
+    externalChangeDetected,
+    enterEditMode,
+    exitEditMode,
+    setDirty,
+    setExternalChangeDetected,
+    saveFile,
+  } = useEditorStore();
 
   // Fallback modification date from recent files when no git commit exists
   const fileMtime = React.useMemo(() => {
@@ -408,6 +428,55 @@ export const ViewerPage: React.FC = () => {
     }
   };
 
+  // Edit mode handlers
+  const handleEnterEdit = useCallback(() => {
+    if (isStaticMode() || !currentPath?.toLowerCase().endsWith(".md")) return;
+    if (fileContent?.encoding === "binary") return;
+    setShowRaw(false);
+    enterEditMode();
+  }, [currentPath, fileContent, enterEditMode]);
+
+  const handleCancelEdit = useCallback(() => {
+    if (isDirty) {
+      if (!window.confirm("You have unsaved changes. Discard them?")) return;
+    }
+    exitEditMode();
+  }, [isDirty, exitEditMode]);
+
+  const handleSaveEdit = useCallback(
+    async (content: string) => {
+      if (!currentPath) return;
+      await saveFile(currentPath, content);
+    },
+    [currentPath, saveFile],
+  );
+
+  const handleReloadEditor = useCallback(() => {
+    if (!currentPath) return;
+    setExternalChangeDetected(false);
+    exitEditMode();
+    loadFile(currentPath);
+  }, [currentPath, exitEditMode, loadFile, setExternalChangeDetected]);
+
+  // Exit edit mode when navigating away
+  useEffect(() => {
+    if (isEditing) {
+      exitEditMode();
+    }
+    // Only trigger on path changes, not on isEditing/exitEditMode
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPath]);
+
+  // Warn about unsaved changes on page unload
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
   // File picker select handler
   const handleFilePickerSelect = useCallback(
     (path: string) => {
@@ -453,6 +522,7 @@ export const ViewerPage: React.FC = () => {
     onNavigate: handleShortcutNavigate,
     onViewDiff: handleViewDiff,
     onViewHistory: handleViewHistory,
+    onEnterEditMode: handleEnterEdit,
     contentScrollRef: contentRef,
     isMultiRepo,
     currentRepo,
@@ -821,7 +891,7 @@ export const ViewerPage: React.FC = () => {
                     </span>
                   </AppLink>
                 )}
-              {currentPath && currentPath.toLowerCase().endsWith(".md") && (
+              {currentPath && currentPath.toLowerCase().endsWith(".md") && !isEditing && (
                 <button
                   onClick={() => { setShowRaw((v) => !v); setCopied(false); }}
                   className={cn(
@@ -834,6 +904,16 @@ export const ViewerPage: React.FC = () => {
                 >
                   <Code size={14} />
                   <span className="hidden sm:inline">{showRaw ? "Rendered" : "Raw"}</span>
+                </button>
+              )}
+              {currentPath && currentPath.toLowerCase().endsWith(".md") && !isStaticMode() && !isEditing && (
+                <button
+                  onClick={handleEnterEdit}
+                  className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg px-2 py-1.5 transition-colors cursor-pointer"
+                  title="Edit file (e)"
+                >
+                  <Pencil size={14} />
+                  <span className="hidden sm:inline">Edit</span>
                 </button>
               )}
             </div>
@@ -862,19 +942,31 @@ export const ViewerPage: React.FC = () => {
                   <span className="text-slate-400 dark:text-slate-500">{formatDateTime(fileMtime)}</span>
                 </div>
               )}
-              <button
-                onClick={() => { setShowRaw((v) => !v); setCopied(false); }}
-                className={cn(
-                  "flex items-center space-x-1.5 text-xs rounded-lg px-2 py-1.5 transition-colors cursor-pointer",
-                  showRaw
-                    ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30"
-                    : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                )}
-                title={showRaw ? "View rendered" : "View raw markdown"}
-              >
-                <Code size={14} />
-                <span className="hidden sm:inline">{showRaw ? "Rendered" : "Raw"}</span>
-              </button>
+              {!isEditing && (
+                <button
+                  onClick={() => { setShowRaw((v) => !v); setCopied(false); }}
+                  className={cn(
+                    "flex items-center space-x-1.5 text-xs rounded-lg px-2 py-1.5 transition-colors cursor-pointer",
+                    showRaw
+                      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30"
+                      : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                  )}
+                  title={showRaw ? "View rendered" : "View raw markdown"}
+                >
+                  <Code size={14} />
+                  <span className="hidden sm:inline">{showRaw ? "Rendered" : "Raw"}</span>
+                </button>
+              )}
+              {!isStaticMode() && !isEditing && (
+                <button
+                  onClick={handleEnterEdit}
+                  className="flex items-center space-x-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700/50 rounded-lg px-2 py-1.5 transition-colors cursor-pointer"
+                  title="Edit file (e)"
+                >
+                  <Pencil size={14} />
+                  <span className="hidden sm:inline">Edit</span>
+                </button>
+              )}
             </div>
           ) : null}
         </div>
@@ -920,6 +1012,26 @@ export const ViewerPage: React.FC = () => {
                     Binary file content cannot be displayed.
                   </p>
                 </div>
+              ) : isEditing ? (
+              <Suspense
+                fallback={
+                  <div className="flex items-center justify-center h-64">
+                    <Loader2 size={32} className="animate-spin text-blue-500" />
+                  </div>
+                }
+              >
+                <MarkdownEditor
+                  initialContent={fileContent.content}
+                  onSave={handleSaveEdit}
+                  onCancel={handleCancelEdit}
+                  isSaving={isSaving}
+                  isDirty={isDirty}
+                  onDirtyChange={setDirty}
+                  externalChangeDetected={externalChangeDetected}
+                  onReload={handleReloadEditor}
+                  onDismissExternalChange={() => setExternalChangeDetected(false)}
+                />
+              </Suspense>
               ) : (
               <div className="pb-8">
                   {showRaw ? (
