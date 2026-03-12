@@ -208,57 +208,95 @@ vantage perf-report              # Performance diagnostics from a running instan
 
 ## 🐳 Docker
 
-Run Vantage in Docker. Each directory gets its own isolated container with auto-assigned ports — view multiple documentation folders simultaneously.
+Vantage can run in Docker for zero-install usage. The `vantage-docker` script wraps Docker commands for convenience.
 
-### Quick Start
+### Single Directory
 
 ```bash
-# 1. Build the image (one-time)
-docker build -t vantage .
-
-# 2. Install the CLI (symlink to your PATH)
-ln -sf /path/to/vantage/vantage-docker /usr/local/bin/vantage-docker
-
-# 3. View your docs
-cd ~/my-docs
+# Serve the current directory
 vantage-docker up
+
+# Serve a specific directory on a specific port
+vantage-docker up ~/notes -p 3000
+
+# Rebuild image before starting
+vantage-docker up --build
+
+# Stop
+vantage-docker down
 ```
 
-### Commands
+### Multi-Repo Daemon
+
+Serve multiple directories from a single container using the same TOML config as `vantage daemon`:
 
 ```bash
-vantage-docker up                     # Start viewer for current directory
-vantage-docker up ~/projects/docs     # Start viewer for a specific path
-vantage-docker up -p 9000             # Use a specific port (default: auto-assign)
-vantage-docker up --build             # Rebuild the Docker image before starting
-vantage-docker down                   # Stop viewer for current directory
-vantage-docker down --all             # Stop all running viewers
-vantage-docker status                 # List all running viewers with ports
-vantage-docker logs                   # Tail container logs for current directory
+# Start the daemon (uses ~/.config/vantage/config.toml)
+vantage-docker daemon
+
+# Start with a custom config
+vantage-docker daemon -c /path/to/config.toml
+
+# Stop the daemon
+vantage-docker daemon-down
 ```
 
-Running `up` twice for the same directory is safe — it prints the existing URL.
+### Adding and Removing Directories
 
-### Multiple Viewers
-
-Each directory gets its own container on its own port:
+Manage repos in the daemon config without editing TOML by hand:
 
 ```bash
-cd ~/notes        && vantage-docker up   # → http://localhost:54821
-cd ~/work/specs   && vantage-docker up   # → http://localhost:61033
-cd ~/project/docs && vantage-docker up   # → http://localhost:49217
+# Add current directory to the daemon
+cd ~/notes
+vantage-docker add
 
-vantage-docker status                    # see all three
-vantage-docker down --all                # stop everything
+# Add a specific directory
+vantage-docker add ~/projects/docs
+
+# Add with a custom name
+vantage-docker add -n my-notes ~/notes
+
+# Remove by path
+vantage-docker remove ~/projects/docs
+
+# Remove by name
+vantage-docker remove -n my-notes
+```
+
+If the daemon is running, `add` and `remove` automatically restart it to pick up changes.
+
+### Typical Workflow
+
+```bash
+# First time: start the daemon (creates config if needed)
+vantage-docker daemon
+
+# From any directory you want to view:
+cd ~/notes && vantage-docker add
+
+# Or without cd:
+vantage-docker add ~/work/specs
+
+# Remove a directory:
+vantage-docker remove ~/work/specs
+
+# Check status:
+vantage-docker status
+
+# Stop:
+vantage-docker daemon-down
 ```
 
 ### Docker Compose
 
-Alternatively, use the included `docker-compose.yml` directly:
+For compose-based workflows:
 
 ```bash
-VANTAGE_DOCS=~/my-docs docker compose up -d
-VANTAGE_DOCS=~/my-docs VANTAGE_PORT=9000 docker compose up -d
+# Single directory (default service)
+VANTAGE_DOCS=~/notes docker compose up
+
+# Daemon mode (requires config.toml and override for repo volumes)
+docker compose --profile daemon up
 ```
 
 Files are mounted read-only into the container. Edits on the host are detected automatically and the browser refreshes via WebSocket — no manual reload needed.
