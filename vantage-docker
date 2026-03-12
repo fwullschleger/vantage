@@ -209,14 +209,40 @@ is_daemon_running() {
     docker inspect -f '{{.State.Running}}' "$DAEMON_CONTAINER" 2>/dev/null | grep -q true
 }
 
+wait_for_ready() {
+    local url="$1"
+    local timeout="${2:-60}"
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local elapsed=0
+
+    printf "  Waiting for UI to be ready... "
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if curl -sf -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+            printf "\r  ✓ UI is ready at %s          \n" "$url"
+            return 0
+        fi
+
+        local i=$(( elapsed % ${#spinner} ))
+        printf "\r  %s Waiting for UI to be ready... (%ds)" "${spinner:$i:1}" "$elapsed"
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    printf "\r  ⚠ Timed out after %ds waiting for %s\n" "$timeout" "$url"
+    return 1
+}
+
 restart_daemon_if_running() {
+    local skip_wait="${1:-}"
     if is_daemon_running; then
         echo "Restarting daemon to pick up changes..."
         docker stop "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
         docker rm "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
         # Re-run daemon with same config
         local config_file="${DAEMON_CONFIG_FILE:-$DEFAULT_CONFIG}"
-        _start_daemon "$config_file" "" ""
+        _start_daemon "$config_file" "" "" "$skip_wait"
     fi
 }
 
@@ -224,6 +250,7 @@ _start_daemon() {
     local config_file="$1"
     local host_port="$2"
     local do_build="$3"
+    local skip_wait="${4:-}"
 
     if [ ! -f "$config_file" ]; then
         echo "Config file not found: $config_file"
@@ -303,17 +330,22 @@ for r in data['repos']:
         $port_arg \
         "${volume_args[@]}" \
         "$IMAGE_NAME" \
-        daemon -c /config/config.toml
+        daemon -c /config/config.toml >/dev/null
 
     local actual_port
     actual_port=$(docker port "$DAEMON_CONTAINER" 8000 2>/dev/null | head -1 | cut -d: -f2)
-    echo "Vantage daemon running at http://localhost:${actual_port:-8000}"
+    actual_port="${actual_port:-8000}"
 
     echo ""
     echo "Repos:"
     while IFS='|' read -r name path; do
         echo "  - $name → $path"
     done <<< "$repo_names"
+    echo ""
+
+    if [ "$skip_wait" != "skip_wait" ]; then
+        wait_for_ready "http://localhost:${actual_port}"
+    fi
 }
 
 # ─── Commands ─────────────────────────────────────────────────────────────────
@@ -363,11 +395,12 @@ cmd_up() {
         --name "$container_name" \
         $port_arg \
         -v "$doc_path:/docs:ro" \
-        "$IMAGE_NAME"
+        "$IMAGE_NAME" >/dev/null
 
     local actual_port
     actual_port=$(docker port "$container_name" 8000 2>/dev/null | head -1 | cut -d: -f2)
-    echo "Running at http://localhost:${actual_port}"
+
+    wait_for_ready "http://localhost:${actual_port}"
 }
 
 cmd_down() {
@@ -547,12 +580,12 @@ print(name)
 
     # Export for restart_daemon_if_running
     export DAEMON_CONFIG_FILE="$config_file"
-    restart_daemon_if_running
+    restart_daemon_if_running "skip_wait"
 
     if is_daemon_running; then
         local port
         port=$(docker port "$DAEMON_CONTAINER" 8000 2>/dev/null | head -1 | cut -d: -f2 || echo "8000")
-        echo "Available at http://localhost:${port}/${name}/"
+        wait_for_ready "http://localhost:${port}/${name}/"
     else
         echo "Start the daemon with: vantage-docker daemon"
     fi
