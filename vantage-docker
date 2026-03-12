@@ -452,13 +452,14 @@ cmd_add() {
     dir_path="${dir_path:-.}"
     dir_path="$(cd "$dir_path" && pwd)"
 
+    local auto_name=false
     if [ -z "$name" ]; then
-        name=$(sanitize_name "$(basename "$dir_path")")
+        auto_name=true
     fi
 
     local config_file="$DEFAULT_CONFIG"
 
-    # Check for duplicates if config exists
+    # Check for duplicates and auto-generate name from path
     if [ -f "$config_file" ]; then
         local existing
         existing=$(python3 -c "
@@ -467,23 +468,78 @@ with open('$config_file', 'rb') as f:
     data = tomllib.load(f)
 for r in data.get('repos', []):
     rpath = os.path.abspath(os.path.expanduser(r['path']))
-    if r['name'] == '$name':
-        print('name')
-        sys.exit(0)
     if rpath == '$dir_path':
         print('path')
         sys.exit(0)
 print('none')
 " 2>/dev/null || echo "none")
 
-        if [ "$existing" = "name" ]; then
-            echo "Repo with name '$name' already exists in config."
-            exit 1
-        fi
         if [ "$existing" = "path" ]; then
             echo "Path '$dir_path' already exists in config."
             exit 1
         fi
+
+        if [ "$auto_name" = false ]; then
+            # Name was explicitly provided — check for conflicts
+            local name_exists
+            name_exists=$(python3 -c "
+import tomllib, sys
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+for r in data.get('repos', []):
+    if r['name'] == '$name':
+        print('yes')
+        sys.exit(0)
+print('no')
+" 2>/dev/null || echo "no")
+            if [ "$name_exists" = "yes" ]; then
+                echo "Repo with name '$name' already exists in config."
+                exit 1
+            fi
+        fi
+    fi
+
+    # Auto-generate a unique name from path components
+    if [ "$auto_name" = true ]; then
+        name=$(python3 -c "
+import re, sys
+
+def sanitize(s):
+    s = s.lower()
+    s = re.sub(r'[^a-z0-9-]', '-', s)
+    s = re.sub(r'-+', '-', s).strip('-')
+    return s
+
+path = '$dir_path'
+parts = [p for p in path.split('/') if p]
+
+# Use last 2 path components (parent-basename) for a recognizable name
+depth = min(2, len(parts))
+name = sanitize('-'.join(parts[-depth:]))
+
+# If config exists, ensure uniqueness by adding more path components
+try:
+    import tomllib
+    with open('$config_file', 'rb') as f:
+        data = tomllib.load(f)
+    existing_names = {r['name'] for r in data.get('repos', [])}
+
+    while name in existing_names and depth < len(parts):
+        depth += 1
+        name = sanitize('-'.join(parts[-depth:]))
+
+    # Final fallback: append a number
+    if name in existing_names:
+        base = name
+        n = 2
+        while name in existing_names:
+            name = f'{base}-{n}'
+            n += 1
+except FileNotFoundError:
+    pass
+
+print(name)
+" 2>/dev/null)
     fi
 
     add_repo_to_config "$config_file" "$name" "$dir_path"
