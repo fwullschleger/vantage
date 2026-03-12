@@ -4,6 +4,7 @@ import time
 from functools import partial
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from vantage.config import RepoConfig
 from vantage.schemas.models import (
@@ -33,6 +34,10 @@ router = APIRouter()
 _repo_activity_cache: dict[str, RepoInfo] = {}
 _repo_activity_cache_time: float = 0.0
 _REPO_ACTIVITY_TTL = 30.0  # seconds before background refresh
+
+
+class FileWriteRequest(BaseModel):
+    content: str
 
 
 def get_fs_service(
@@ -331,6 +336,18 @@ async def get_content_multi(repo: str, path: str):
         raise HTTPException(status_code=400, detail=str(e)) from None
 
 
+@router.put("/r/{repo}/content", response_model=FileContent)
+async def put_content_multi(repo: str, path: str, request: FileWriteRequest):
+    fs = get_fs_service(repo)
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, partial(fs.write_file, path, request.content)
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+
 @router.get("/r/{repo}/git/history", response_model=list[GitCommit])
 async def get_history_multi(repo: str, path: str):
     git = get_git_service(repo)
@@ -461,6 +478,19 @@ async def get_content(path: str):
     fs = get_fs_service()
     try:
         return fs.read_file(path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+
+@router.put("/content", response_model=FileContent)
+async def put_content(path: str, request: FileWriteRequest):
+    _require_single_repo_mode()
+    fs = get_fs_service()
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(
+            None, partial(fs.write_file, path, request.content)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 

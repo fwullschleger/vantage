@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useRepoStore } from "../stores/useRepoStore";
 import { useGitStore } from "../stores/useGitStore";
 import { useConnectionStore } from "../stores/useConnectionStore";
+import { useEditorStore } from "../stores/useEditorStore";
 import { WebSocketMessage } from "../types";
 import { isStaticMode } from "../lib/staticMode";
 
@@ -97,7 +98,18 @@ export const useWebSocket = () => {
     const promises: Promise<unknown>[] = [];
 
     if (path && changedPaths.has(path)) {
-      promises.push(loadFile(path));
+      const editorState = useEditorStore.getState();
+      if (editorState.isEditing) {
+        // If we just saved, skip entirely (our own write triggered this)
+        if (Date.now() - editorState.lastSaveTimestamp < 2000) {
+          // Skip loadFile — this is our own save echoing back
+        } else {
+          // External change while editing — signal the editor
+          editorState.setExternalChangeDetected(true);
+        }
+      } else {
+        promises.push(loadFile(path));
+      }
       promises.push(fetchStatus(path));
     }
 
