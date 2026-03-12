@@ -237,6 +237,8 @@ class FileSystemService:
                 f.write(content)
         except PermissionError:
             raise ValueError("Permission denied") from None
+        except OSError as e:
+            raise ValueError(f"Cannot write file: {e.strerror}") from None
 
         return FileContent(path=path, content=content, encoding="utf-8")
 
