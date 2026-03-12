@@ -236,6 +236,12 @@ vantage-docker daemon --build
 
 # Stop the daemon
 vantage-docker daemon-down
+
+# List configured repos
+vantage-docker ls
+
+# Show all vantage containers
+vantage-docker ps
 ```
 
 ### Adding and Removing Directories
@@ -277,8 +283,11 @@ vantage-docker add ~/work/specs
 # Remove a directory:
 vantage-docker remove ~/work/specs
 
-# Check status:
-vantage-docker status
+# List configured repos:
+vantage-docker ls
+
+# Show running containers:
+vantage-docker ps
 
 # Stop:
 vantage-docker daemon-down
