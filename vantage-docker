@@ -15,8 +15,9 @@ Usage: vantage-docker <command> [options]
 Single-directory mode:
   up [PATH]                Serve a directory (default: current dir)
     --build                Rebuild the image before starting
-    -p PORT                Host port (default: 8000)
-  down                     Stop the single-directory container
+    -p PORT                Host port (default: auto-assigned free port)
+  down [PATH]              Stop the viewer for a directory (default: current dir)
+    --all, -a              Stop all running single-directory viewers
   status                   Show running vantage containers
 
 Daemon mode (multi-repo):
@@ -56,6 +57,19 @@ ensure_image() {
 
 sanitize_name() {
     echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//'
+}
+
+container_name_for() {
+    local path="$1"
+    local base
+    base=$(sanitize_name "$(basename "$path")")
+    local hash
+    hash=$(echo -n "$path" | md5sum 2>/dev/null | cut -c1-8 || echo -n "$path" | md5 -q 2>/dev/null | cut -c1-8)
+    echo "vantage-${base}-${hash}"
+}
+
+find_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()"
 }
 
 parse_repos_from_config() {
@@ -311,7 +325,7 @@ for r in data['repos']:
             echo "Warning: repo '$name' path does not exist: $path (skipping)"
             continue
         fi
-        volume_args+=("-v" "$path:/repos/$name:ro")
+        volume_args+=("-v" "$path:/repos/$name")
     done <<< "$repo_names"
 
     # Determine port
@@ -377,49 +391,84 @@ cmd_up() {
         ensure_image
     fi
 
-    local name
-    name=$(sanitize_name "$(basename "$doc_path")")
-    local container_name="vantage-${name}"
+    local container_name
+    container_name=$(container_name_for "$doc_path")
 
-    local port_arg=""
-    if [ -n "$host_port" ]; then
-        port_arg="-p $host_port:8000"
-    else
-        port_arg="-p 8000"
+    # Already running? Just show the URL.
+    if docker ps -q -f name="^${container_name}$" | grep -q .; then
+        local existing_port
+        existing_port=$(docker port "$container_name" 8000 | head -1 | cut -d: -f2)
+        echo "Already running for: $doc_path"
+        echo "URL: http://localhost:${existing_port}"
+        echo ""
+        echo "Run 'vantage-docker down' to stop it."
+        return 0
     fi
 
-    # Stop existing container with same name
-    docker stop "$container_name" >/dev/null 2>&1 || true
-    docker rm "$container_name" >/dev/null 2>&1 || true
+    local port
+    if [ -n "$host_port" ]; then
+        port="$host_port"
+    else
+        port=$(find_free_port)
+    fi
+
+    # Clean up stopped container with same name
+    docker rm "$container_name" 2>/dev/null || true
 
     echo "Serving $doc_path ..."
-    # shellcheck disable=SC2086
     docker run -d \
         --name "$container_name" \
-        $port_arg \
-        -v "$doc_path:/docs:ro" \
+        --rm \
+        -p "$port:8000" \
+        -v "$doc_path:/docs" \
+        --label "app=vantage" \
+        --label "vantage.docs=$doc_path" \
         "$IMAGE_NAME" >/dev/null
 
-    local actual_port
-    actual_port=$(docker port "$container_name" 8000 2>/dev/null | head -1 | cut -d: -f2)
-
-    wait_for_ready "http://localhost:${actual_port}"
+    wait_for_ready "http://localhost:${port}"
 }
 
 cmd_down() {
-    local containers
-    containers=$(docker ps -a --filter "name=vantage-" --format "{{.Names}}" | grep -v "$DAEMON_CONTAINER" || true)
+    local all=false
+    local doc_path=""
 
-    if [ -z "$containers" ]; then
-        echo "No single-directory vantage containers found."
-        return
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all|-a) all=true; shift ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) doc_path="$1"; shift ;;
+        esac
+    done
+
+    if $all; then
+        local containers
+        containers=$(docker ps -a --filter "label=app=vantage" --format "{{.Names}}" || true)
+        if [ -z "$containers" ]; then
+            echo "No running vantage containers."
+        else
+            echo "Stopping all vantage containers..."
+            echo "$containers" | while read -r name; do
+                docker stop "$name" >/dev/null 2>&1 || true
+                docker rm "$name" >/dev/null 2>&1 || true
+            done
+            echo "Done."
+        fi
+        return 0
     fi
 
-    echo "$containers" | while read -r name; do
-        echo "Stopping $name..."
-        docker stop "$name" >/dev/null 2>&1 || true
-        docker rm "$name" >/dev/null 2>&1 || true
-    done
+    doc_path="${doc_path:-.}"
+    doc_path="$(cd "$doc_path" && pwd)"
+    local container_name
+    container_name=$(container_name_for "$doc_path")
+
+    if docker ps -q -f name="^${container_name}$" | grep -q .; then
+        echo "Stopping viewer for: $doc_path"
+        docker stop "$container_name" >/dev/null 2>&1 || true
+        docker rm "$container_name" >/dev/null 2>&1 || true
+        echo "Stopped."
+    else
+        echo "No running viewer for: $doc_path"
+    fi
 }
 
 cmd_status() {
@@ -437,16 +486,16 @@ cmd_status() {
         echo "  daemon:  $state  http://localhost:${port}"
     fi
 
-    # Check single-directory containers
+    # Check single-directory containers (using label)
     local containers
-    containers=$(docker ps -a --filter "name=vantage-" --format "{{.Names}}\t{{.Status}}" | grep -v "$DAEMON_CONTAINER" || true)
+    containers=$(docker ps -a --filter "label=app=vantage" --format "{{.Names}}\t{{.Status}}\t{{.Label \"vantage.docs\"}}" || true)
 
     if [ -n "$containers" ]; then
         found=true
-        while IFS=$'\t' read -r name status; do
+        while IFS=$'\t' read -r name status docs; do
             local port
             port=$(docker port "$name" 8000 2>/dev/null | head -1 | cut -d: -f2 || echo "N/A")
-            echo "  $name:  $status  http://localhost:${port}"
+            echo "  $name:  $status  http://localhost:${port}  ($docs)"
         done <<< "$containers"
     fi
 

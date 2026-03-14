@@ -212,18 +212,30 @@ Vantage can run in Docker for zero-install usage. The `vantage-docker` script wr
 
 ### Single Directory
 
+Each directory gets its own container with an auto-assigned port. You can run multiple directories simultaneously:
+
 ```bash
-# Serve the current directory
+# Serve the current directory (auto-assigns a free port)
 vantage-docker up
 
 # Serve a specific directory on a specific port
 vantage-docker up ~/notes -p 3000
 
+# Serve multiple directories at the same time
+vantage-docker up ~/notes
+vantage-docker up ~/work/docs
+
 # Rebuild image before starting
 vantage-docker up --build
 
-# Stop
+# Stop the viewer for the current directory
 vantage-docker down
+
+# Stop viewer for a specific directory
+vantage-docker down ~/notes
+
+# Stop all single-directory viewers
+vantage-docker down --all
 ```
 
 ### Multi-Repo Daemon
@@ -316,7 +328,7 @@ docker compose --profile daemon up
 
 All commands that start or restart a container (`up`, `daemon`, `add`) block until the UI is fully available, showing a spinner while waiting. Once ready, the command prints the URL and exits.
 
-Files are mounted read-only into the container. Edits on the host are detected automatically and the browser refreshes via WebSocket — no manual reload needed.
+Host directories are mounted into the container. Edits on the host are detected automatically and the browser refreshes via WebSocket — no manual reload needed.
 
 ---
 
