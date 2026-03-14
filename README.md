@@ -197,6 +197,132 @@ vantage build PATH -o OUTPUT     # Build a static site
 
 ---
 
+## 🐳 Docker
+
+Vantage can run in Docker for zero-install usage. The `vantage-docker` script wraps Docker commands for convenience.
+
+### Single Directory
+
+Each directory gets its own container with an auto-assigned port. You can run multiple directories simultaneously:
+
+```bash
+# Serve the current directory (auto-assigns a free port)
+vantage-docker up
+
+# Serve a specific directory on a specific port
+vantage-docker up ~/notes -p 3000
+
+# Serve multiple directories at the same time
+vantage-docker up ~/notes
+vantage-docker up ~/work/docs
+
+# Rebuild image before starting
+vantage-docker up --build
+
+# Stop the viewer for the current directory
+vantage-docker down
+
+# Stop viewer for a specific directory
+vantage-docker down ~/notes
+
+# Stop all single-directory viewers
+vantage-docker down --all
+```
+
+### Multi-Repo Daemon
+
+Serve multiple directories from a single container using the same TOML config as `vantage daemon`:
+
+```bash
+# Start the daemon (uses ~/.config/vantage/config.toml)
+vantage-docker daemon
+
+# Start with a custom config
+vantage-docker daemon -c /path/to/config.toml
+
+# Start on a specific port
+vantage-docker daemon -p 3000
+
+# Rebuild image before starting
+vantage-docker daemon --build
+
+# Stop the daemon
+vantage-docker daemon-down
+
+# List configured repos
+vantage-docker ls
+
+# Show all vantage containers
+vantage-docker ps
+```
+
+### Adding and Removing Directories
+
+Manage repos in the daemon config without editing TOML by hand:
+
+```bash
+# Add current directory to the daemon
+cd ~/notes
+vantage-docker add
+
+# Add a specific directory
+vantage-docker add ~/projects/docs
+
+# Add with a custom name
+vantage-docker add -n my-notes ~/notes
+
+# Remove by path
+vantage-docker remove ~/projects/docs
+
+# Remove by name
+vantage-docker remove -n my-notes
+```
+
+If the daemon is running, `add` and `remove` automatically restart it to pick up changes.
+
+### Typical Workflow
+
+```bash
+# First time: start the daemon (creates config if needed)
+vantage-docker daemon
+
+# From any directory you want to view:
+cd ~/notes && vantage-docker add
+
+# Or without cd:
+vantage-docker add ~/work/specs
+
+# Remove a directory:
+vantage-docker remove ~/work/specs
+
+# List configured repos:
+vantage-docker ls
+
+# Show running containers:
+vantage-docker ps
+
+# Stop:
+vantage-docker daemon-down
+```
+
+### Docker Compose
+
+For compose-based workflows:
+
+```bash
+# Single directory (default service)
+VANTAGE_DOCS=~/notes docker compose up
+
+# Daemon mode (requires config.toml and override for repo volumes)
+docker compose --profile daemon up
+```
+
+All commands that start or restart a container (`up`, `daemon`, `add`) block until the UI is fully available, showing a spinner while waiting. Once ready, the command prints the URL and exits.
+
+Host directories are mounted into the container. Edits on the host are detected automatically and the browser refreshes via WebSocket — no manual reload needed.
+
+---
+
 ## 🔌 API
 
 Vantage exposes a REST API for programmatic access.

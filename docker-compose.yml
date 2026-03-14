@@ -1,0 +1,18 @@
+services:
+  vantage:
+    build: .
+    ports:
+      - "${VANTAGE_PORT:-8000}:8000"
+    volumes:
+      - "${VANTAGE_DOCS:-.}:/docs:ro"
+    restart: unless-stopped
+
+  vantage-daemon:
+    build: .
+    profiles: [daemon]
+    ports:
+      - "${VANTAGE_PORT:-8000}:8000"
+    volumes:
+      - "${VANTAGE_CONFIG:-./config.toml}:/config/config.toml:ro"
+    command: ["daemon", "-c", "/config/config.toml"]
+    restart: unless-stopped

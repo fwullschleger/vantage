@@ -1,0 +1,742 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || python3 -c "import os,sys; print(os.path.realpath(sys.argv[1]))" "$0")")" && pwd)"
+IMAGE_NAME="vantage"
+DAEMON_CONTAINER="vantage-daemon"
+DEFAULT_CONFIG="$HOME/.config/vantage/config.toml"
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+usage() {
+    cat <<'EOF'
+Usage: vantage-docker <command> [options]
+
+Single-directory mode:
+  up [PATH]                Serve a directory (default: current dir)
+    --build                Rebuild the image before starting
+    -p PORT                Host port (default: auto-assigned free port)
+  down [PATH]              Stop the viewer for a directory (default: current dir)
+    --all, -a              Stop all running single-directory viewers
+  status                   Show running vantage containers
+
+Daemon mode (multi-repo):
+  daemon                   Start the daemon from config file
+    -c CONFIG              Config file (default: ~/.config/vantage/config.toml)
+    --build                Rebuild the image before starting
+    -p PORT                Host port (default: 8000)
+  daemon-down              Stop the daemon container
+  ls                       List configured repos from config file
+    -c CONFIG              Config file (default: ~/.config/vantage/config.toml)
+  ps                       Show all vantage Docker containers
+  add [PATH]               Add a directory to daemon config and restart
+    -n NAME                Custom repo name (default: directory basename)
+  remove [PATH]            Remove a directory from daemon config and restart
+    -n NAME                Remove by repo name instead of path
+
+Examples:
+  vantage-docker up ~/notes
+  vantage-docker daemon
+  vantage-docker add ~/projects/docs
+  vantage-docker add -n my-notes ~/notes
+  vantage-docker remove ~/projects/docs
+  vantage-docker remove -n my-notes
+EOF
+}
+
+default_config() {
+    echo "$DEFAULT_CONFIG"
+}
+
+ensure_image() {
+    if ! docker image inspect "$IMAGE_NAME" &>/dev/null; then
+        echo "Building $IMAGE_NAME image..."
+        docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    fi
+}
+
+sanitize_name() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//'
+}
+
+container_name_for() {
+    local path="$1"
+    local base
+    base=$(sanitize_name "$(basename "$path")")
+    local hash
+    hash=$(echo -n "$path" | md5sum 2>/dev/null | cut -c1-8 || echo -n "$path" | md5 -q 2>/dev/null | cut -c1-8)
+    echo "vantage-${base}-${hash}"
+}
+
+find_free_port() {
+    python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()"
+}
+
+parse_repos_from_config() {
+    local config_file="$1"
+    python3 -c "
+import tomllib, json, sys
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+repos = data.get('repos', [])
+result = {
+    'host': data.get('host', '127.0.0.1'),
+    'port': data.get('port', 8000),
+    'show_hidden': data.get('show_hidden', True),
+    'repos': []
+}
+if 'exclude_dirs' in data:
+    result['exclude_dirs'] = data['exclude_dirs']
+for r in repos:
+    import os.path
+    path = os.path.expanduser(r['path'])
+    path = os.path.abspath(path)
+    result['repos'].append({'name': r['name'], 'path': path})
+print(json.dumps(result))
+"
+}
+
+rewrite_config_for_container() {
+    local config_json="$1"
+    local tmp_config="$2"
+    python3 -c "
+import json, sys
+
+data = json.loads('''$config_json''')
+
+lines = []
+lines.append('host = \"0.0.0.0\"')
+lines.append('port = 8000')
+
+if data.get('show_hidden') is not None:
+    lines.append(f'show_hidden = {str(data[\"show_hidden\"]).lower()}')
+
+if 'exclude_dirs' in data:
+    dirs = ', '.join(f'\"{d}\"' for d in data['exclude_dirs'])
+    lines.append(f'exclude_dirs = [{dirs}]')
+
+lines.append('')
+for repo in data['repos']:
+    lines.append('[[repos]]')
+    lines.append(f'name = \"{repo[\"name\"]}\"')
+    lines.append(f'path = \"/repos/{repo[\"name\"]}\"')
+    lines.append('')
+
+with open('$tmp_config', 'w') as f:
+    f.write('\n'.join(lines))
+"
+}
+
+add_repo_to_config() {
+    local config_file="$1"
+    local name="$2"
+    local path="$3"
+    python3 -c "
+import os
+
+config_file = '$config_file'
+name = '$name'
+path = '$path'
+
+# Ensure config directory exists
+os.makedirs(os.path.dirname(config_file), exist_ok=True)
+
+# Create minimal config if it doesn't exist
+if not os.path.exists(config_file):
+    with open(config_file, 'w') as f:
+        f.write('# Vantage Daemon Configuration\nhost = \"127.0.0.1\"\nport = 8000\n\n')
+
+entry = f'''
+[[repos]]
+name = \"{name}\"
+path = \"{path}\"
+'''
+
+with open(config_file, 'a') as f:
+    f.write(entry)
+"
+}
+
+remove_repo_from_config() {
+    local config_file="$1"
+    local by_name="$2"  # "name" or "path"
+    local value="$3"
+    python3 -c "
+import tomllib, sys, os
+
+config_file = '$config_file'
+by = '$by_name'
+value = '$value'
+
+if not os.path.exists(config_file):
+    print('Config file not found: ' + config_file, file=sys.stderr)
+    sys.exit(1)
+
+with open(config_file, 'rb') as f:
+    data = tomllib.load(f)
+
+repos = data.get('repos', [])
+original_count = len(repos)
+
+if by == 'name':
+    repos = [r for r in repos if r['name'] != value]
+else:
+    abs_value = os.path.abspath(os.path.expanduser(value))
+    repos = [r for r in repos if os.path.abspath(os.path.expanduser(r['path'])) != abs_value]
+
+if len(repos) == original_count:
+    print(f'No matching repo found for {by}={value}', file=sys.stderr)
+    sys.exit(1)
+
+# Rewrite the config file
+lines = []
+if 'host' in data:
+    lines.append(f'host = \"{data[\"host\"]}\"')
+if 'port' in data:
+    lines.append(f'port = {data[\"port\"]}')
+if 'show_hidden' in data:
+    lines.append(f'show_hidden = {str(data[\"show_hidden\"]).lower()}')
+if 'exclude_dirs' in data:
+    dirs = ', '.join(f'\"{d}\"' for d in data['exclude_dirs'])
+    lines.append(f'exclude_dirs = [{dirs}]')
+if 'walk_max_depth' in data:
+    lines.append(f'walk_max_depth = {data[\"walk_max_depth\"]}')
+if 'walk_timeout' in data:
+    lines.append(f'walk_timeout = {data[\"walk_timeout\"]}')
+
+lines.append('')
+for r in repos:
+    lines.append('[[repos]]')
+    lines.append(f'name = \"{r[\"name\"]}\"')
+    lines.append(f'path = \"{r[\"path\"]}\"')
+    if 'allowed_read_roots' in r:
+        roots = ', '.join(f'\"{root}\"' for root in r['allowed_read_roots'])
+        lines.append(f'allowed_read_roots = [{roots}]')
+    lines.append('')
+
+with open(config_file, 'w') as f:
+    f.write('\n'.join(lines))
+
+removed_name = value if by == 'name' else value
+print(f'Removed repo: {removed_name}')
+"
+}
+
+is_daemon_running() {
+    docker inspect -f '{{.State.Running}}' "$DAEMON_CONTAINER" 2>/dev/null | grep -q true
+}
+
+wait_for_ready() {
+    local url="$1"
+    local timeout="${2:-60}"
+    local spinner='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local elapsed=0
+
+    printf "  Waiting for UI to be ready... "
+
+    while [ "$elapsed" -lt "$timeout" ]; do
+        if curl -sf -o /dev/null --max-time 2 "$url" 2>/dev/null; then
+            printf "\r  ✓ UI is ready at %s          \n" "$url"
+            return 0
+        fi
+
+        local i=$(( elapsed % ${#spinner} ))
+        printf "\r  %s Waiting for UI to be ready... (%ds)" "${spinner:$i:1}" "$elapsed"
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    printf "\r  ⚠ Timed out after %ds waiting for %s\n" "$timeout" "$url"
+    return 1
+}
+
+restart_daemon_if_running() {
+    local skip_wait="${1:-}"
+    if is_daemon_running; then
+        echo "Restarting daemon to pick up changes..."
+        docker stop "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+        docker rm "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+        # Re-run daemon with same config
+        local config_file="${DAEMON_CONFIG_FILE:-$DEFAULT_CONFIG}"
+        _start_daemon "$config_file" "" "" "$skip_wait"
+    fi
+}
+
+_start_daemon() {
+    local config_file="$1"
+    local host_port="$2"
+    local do_build="$3"
+    local skip_wait="${4:-}"
+
+    if [ ! -f "$config_file" ]; then
+        echo "Config file not found: $config_file"
+        echo "Creating minimal config..."
+        mkdir -p "$(dirname "$config_file")"
+        cat > "$config_file" <<'TOML'
+# Vantage Daemon Configuration
+host = "127.0.0.1"
+port = 8000
+TOML
+        echo "Created $config_file"
+        echo "Add directories with: vantage-docker add <path>"
+        exit 0
+    fi
+
+    if [ "$do_build" = "yes" ]; then
+        echo "Building $IMAGE_NAME image..."
+        docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    else
+        ensure_image
+    fi
+
+    # Parse the config
+    local config_json
+    config_json=$(parse_repos_from_config "$config_file")
+
+    local repo_count
+    repo_count=$(echo "$config_json" | python3 -c "import json,sys; print(len(json.loads(sys.stdin.read())['repos']))")
+
+    if [ "$repo_count" -eq 0 ]; then
+        echo "No repos configured in $config_file"
+        echo "Use 'vantage-docker add <path>' to add directories."
+        exit 1
+    fi
+
+    # Generate container config
+    local tmp_config
+    tmp_config=$(mktemp /tmp/vantage-daemon-config.XXXXXX)
+    rewrite_config_for_container "$config_json" "$tmp_config"
+
+    # Build volume args for each repo
+    local volume_args=()
+    volume_args+=("-v" "$tmp_config:/config/config.toml:ro")
+
+    local repo_names
+    repo_names=$(echo "$config_json" | python3 -c "
+import json, sys
+data = json.loads(sys.stdin.read())
+for r in data['repos']:
+    print(r['name'] + '|' + r['path'])
+")
+
+    while IFS='|' read -r name path; do
+        if [ ! -d "$path" ]; then
+            echo "Warning: repo '$name' path does not exist: $path (skipping)"
+            continue
+        fi
+        volume_args+=("-v" "$path:/repos/$name")
+    done <<< "$repo_names"
+
+    # Determine port
+    local port_arg=""
+    if [ -n "$host_port" ]; then
+        port_arg="-p $host_port:8000"
+    else
+        port_arg="-p 8000:8000"
+    fi
+
+    # Stop existing daemon if running
+    docker stop "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+    docker rm "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+
+    echo "Starting vantage daemon with $repo_count repo(s)..."
+    # shellcheck disable=SC2086
+    docker run -d \
+        --name "$DAEMON_CONTAINER" \
+        $port_arg \
+        "${volume_args[@]}" \
+        "$IMAGE_NAME" \
+        daemon -c /config/config.toml >/dev/null
+
+    local actual_port
+    actual_port=$(docker port "$DAEMON_CONTAINER" 8000 2>/dev/null | head -1 | cut -d: -f2)
+    actual_port="${actual_port:-8000}"
+
+    echo ""
+    echo "Repos:"
+    while IFS='|' read -r name path; do
+        echo "  - $name → $path"
+    done <<< "$repo_names"
+    echo ""
+
+    if [ "$skip_wait" != "skip_wait" ]; then
+        wait_for_ready "http://localhost:${actual_port}"
+    fi
+}
+
+# ─── Commands ─────────────────────────────────────────────────────────────────
+
+cmd_up() {
+    local doc_path=""
+    local host_port=""
+    local do_build=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --build) do_build="yes"; shift ;;
+            -p) host_port="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) doc_path="$1"; shift ;;
+        esac
+    done
+
+    doc_path="${doc_path:-.}"
+    doc_path="$(cd "$doc_path" && pwd)"
+
+    if [ "$do_build" = "yes" ]; then
+        echo "Building $IMAGE_NAME image..."
+        docker build -t "$IMAGE_NAME" "$SCRIPT_DIR"
+    else
+        ensure_image
+    fi
+
+    local container_name
+    container_name=$(container_name_for "$doc_path")
+
+    # Already running? Just show the URL.
+    if docker ps -q -f name="^${container_name}$" | grep -q .; then
+        local existing_port
+        existing_port=$(docker port "$container_name" 8000 | head -1 | cut -d: -f2)
+        echo "Already running for: $doc_path"
+        echo "URL: http://localhost:${existing_port}"
+        echo ""
+        echo "Run 'vantage-docker down' to stop it."
+        return 0
+    fi
+
+    local port
+    if [ -n "$host_port" ]; then
+        port="$host_port"
+    else
+        port=$(find_free_port)
+    fi
+
+    # Clean up stopped container with same name
+    docker rm "$container_name" 2>/dev/null || true
+
+    echo "Serving $doc_path ..."
+    docker run -d \
+        --name "$container_name" \
+        --rm \
+        -p "$port:8000" \
+        -v "$doc_path:/docs" \
+        --label "app=vantage" \
+        --label "vantage.docs=$doc_path" \
+        "$IMAGE_NAME" >/dev/null
+
+    wait_for_ready "http://localhost:${port}"
+}
+
+cmd_down() {
+    local all=false
+    local doc_path=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all|-a) all=true; shift ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) doc_path="$1"; shift ;;
+        esac
+    done
+
+    if $all; then
+        local containers
+        containers=$(docker ps -a --filter "label=app=vantage" --format "{{.Names}}" || true)
+        if [ -z "$containers" ]; then
+            echo "No running vantage containers."
+        else
+            echo "Stopping all vantage containers..."
+            echo "$containers" | while read -r name; do
+                docker stop "$name" >/dev/null 2>&1 || true
+                docker rm "$name" >/dev/null 2>&1 || true
+            done
+            echo "Done."
+        fi
+        return 0
+    fi
+
+    doc_path="${doc_path:-.}"
+    doc_path="$(cd "$doc_path" && pwd)"
+    local container_name
+    container_name=$(container_name_for "$doc_path")
+
+    if docker ps -q -f name="^${container_name}$" | grep -q .; then
+        echo "Stopping viewer for: $doc_path"
+        docker stop "$container_name" >/dev/null 2>&1 || true
+        docker rm "$container_name" >/dev/null 2>&1 || true
+        echo "Stopped."
+    else
+        echo "No running viewer for: $doc_path"
+    fi
+}
+
+cmd_status() {
+    echo "Vantage containers:"
+    echo ""
+    local found=false
+
+    # Check daemon
+    if docker inspect "$DAEMON_CONTAINER" &>/dev/null; then
+        found=true
+        local state
+        state=$(docker inspect -f '{{.State.Status}}' "$DAEMON_CONTAINER")
+        local port
+        port=$(docker port "$DAEMON_CONTAINER" 8000 2>/dev/null | head -1 | cut -d: -f2 || echo "N/A")
+        echo "  daemon:  $state  http://localhost:${port}"
+    fi
+
+    # Check single-directory containers (using label)
+    local containers
+    containers=$(docker ps -a --filter "label=app=vantage" --format "{{.Names}}\t{{.Status}}\t{{.Label \"vantage.docs\"}}" || true)
+
+    if [ -n "$containers" ]; then
+        found=true
+        while IFS=$'\t' read -r name status docs; do
+            local port
+            port=$(docker port "$name" 8000 2>/dev/null | head -1 | cut -d: -f2 || echo "N/A")
+            echo "  $name:  $status  http://localhost:${port}  ($docs)"
+        done <<< "$containers"
+    fi
+
+    if [ "$found" = false ]; then
+        echo "  (none running)"
+    fi
+}
+
+cmd_daemon() {
+    local config_file="$DEFAULT_CONFIG"
+    local host_port=""
+    local do_build=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -c) config_file="$2"; shift 2 ;;
+            --build) do_build="yes"; shift ;;
+            -p) host_port="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) echo "Unknown argument: $1"; exit 1 ;;
+        esac
+    done
+
+    _start_daemon "$config_file" "$host_port" "$do_build"
+}
+
+cmd_add() {
+    local name=""
+    local dir_path=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n) name="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) dir_path="$1"; shift ;;
+        esac
+    done
+
+    dir_path="${dir_path:-.}"
+    dir_path="$(cd "$dir_path" && pwd)"
+
+    local auto_name=false
+    if [ -z "$name" ]; then
+        auto_name=true
+    fi
+
+    local config_file="$DEFAULT_CONFIG"
+
+    # Check for duplicates and auto-generate name from path
+    if [ -f "$config_file" ]; then
+        local existing
+        existing=$(python3 -c "
+import tomllib, os, sys
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+for r in data.get('repos', []):
+    rpath = os.path.abspath(os.path.expanduser(r['path']))
+    if rpath == '$dir_path':
+        print('path')
+        sys.exit(0)
+print('none')
+" 2>/dev/null || echo "none")
+
+        if [ "$existing" = "path" ]; then
+            echo "Path '$dir_path' already exists in config."
+            exit 1
+        fi
+
+        if [ "$auto_name" = false ]; then
+            # Name was explicitly provided — check for conflicts
+            local name_exists
+            name_exists=$(python3 -c "
+import tomllib, sys
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+for r in data.get('repos', []):
+    if r['name'] == '$name':
+        print('yes')
+        sys.exit(0)
+print('no')
+" 2>/dev/null || echo "no")
+            if [ "$name_exists" = "yes" ]; then
+                echo "Repo with name '$name' already exists in config."
+                exit 1
+            fi
+        fi
+    fi
+
+    # Auto-generate a unique name from path components
+    if [ "$auto_name" = true ]; then
+        name=$(python3 -c "
+import re, sys
+
+def sanitize(s):
+    s = s.lower()
+    s = re.sub(r'[^a-z0-9-]', '-', s)
+    s = re.sub(r'-+', '-', s).strip('-')
+    return s
+
+path = '$dir_path'
+parts = [p for p in path.split('/') if p]
+
+# Use last 2 path components (parent-basename) for a recognizable name
+depth = min(2, len(parts))
+name = sanitize('-'.join(parts[-depth:]))
+
+# If config exists, ensure uniqueness by adding more path components
+try:
+    import tomllib
+    with open('$config_file', 'rb') as f:
+        data = tomllib.load(f)
+    existing_names = {r['name'] for r in data.get('repos', [])}
+
+    while name in existing_names and depth < len(parts):
+        depth += 1
+        name = sanitize('-'.join(parts[-depth:]))
+
+    # Final fallback: append a number
+    if name in existing_names:
+        base = name
+        n = 2
+        while name in existing_names:
+            name = f'{base}-{n}'
+            n += 1
+except FileNotFoundError:
+    pass
+
+print(name)
+" 2>/dev/null)
+    fi
+
+    add_repo_to_config "$config_file" "$name" "$dir_path"
+    echo "Added '$name' → $dir_path"
+
+    # Export for restart_daemon_if_running
+    export DAEMON_CONFIG_FILE="$config_file"
+    restart_daemon_if_running "skip_wait"
+
+    if is_daemon_running; then
+        local port
+        port=$(docker port "$DAEMON_CONTAINER" 8000 2>/dev/null | head -1 | cut -d: -f2 || echo "8000")
+        wait_for_ready "http://localhost:${port}/${name}/"
+    else
+        echo "Start the daemon with: vantage-docker daemon"
+    fi
+}
+
+cmd_remove() {
+    local name=""
+    local dir_path=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n) name="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) dir_path="$1"; shift ;;
+        esac
+    done
+
+    local config_file="$DEFAULT_CONFIG"
+
+    if [ -n "$name" ]; then
+        remove_repo_from_config "$config_file" "name" "$name"
+    elif [ -n "$dir_path" ]; then
+        dir_path="$(cd "$dir_path" && pwd)"
+        remove_repo_from_config "$config_file" "path" "$dir_path"
+    else
+        # Default: remove current directory by path
+        dir_path="$(pwd)"
+        remove_repo_from_config "$config_file" "path" "$dir_path"
+    fi
+
+    export DAEMON_CONFIG_FILE="$config_file"
+    restart_daemon_if_running
+}
+
+cmd_daemon_ls() {
+    local config_file="$DEFAULT_CONFIG"
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -c) config_file="$2"; shift 2 ;;
+            -*) echo "Unknown option: $1"; exit 1 ;;
+            *) echo "Unknown argument: $1"; exit 1 ;;
+        esac
+    done
+
+    if [ ! -f "$config_file" ]; then
+        echo "No config found at $config_file"
+        exit 1
+    fi
+
+    python3 -c "
+import tomllib, os
+with open('$config_file', 'rb') as f:
+    data = tomllib.load(f)
+repos = data.get('repos', [])
+if not repos:
+    print('No repos configured.')
+else:
+    for r in repos:
+        path = os.path.expanduser(r['path'])
+        print(f'  {r[\"name\"]}\t→ {path}')
+"
+}
+
+cmd_ps() {
+    docker ps -a --filter "name=vantage" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+}
+
+cmd_daemon_down() {
+    if docker inspect "$DAEMON_CONTAINER" &>/dev/null; then
+        echo "Stopping daemon..."
+        docker stop "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+        docker rm "$DAEMON_CONTAINER" >/dev/null 2>&1 || true
+        echo "Daemon stopped."
+    else
+        echo "No daemon container found."
+    fi
+}
+
+# ─── Main ─────────────────────────────────────────────────────────────────────
+
+if [[ $# -eq 0 ]]; then
+    usage
+    exit 0
+fi
+
+command="$1"
+shift
+
+case "$command" in
+    up)         cmd_up "$@" ;;
+    down)       cmd_down "$@" ;;
+    status)     cmd_status "$@" ;;
+    daemon)     cmd_daemon "$@" ;;
+    daemon-down) cmd_daemon_down "$@" ;;
+    ls)         cmd_daemon_ls "$@" ;;
+    ps)         cmd_ps "$@" ;;
+    add)        cmd_add "$@" ;;
+    remove)     cmd_remove "$@" ;;
+    help|--help|-h) usage ;;
+    *)          echo "Unknown command: $command"; usage; exit 1 ;;
+esac
