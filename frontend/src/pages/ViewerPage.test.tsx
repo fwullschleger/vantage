@@ -217,4 +217,30 @@ describe("ViewerPage", () => {
       screen.getAllByText(/does-not-exist.md/i).length,
     ).toBeGreaterThanOrEqual(1);
   });
+
+  it("shows loading state before repos are loaded (prevents flash of wrong UI)", () => {
+    (useRepoStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      fileTree: [],
+      fileContent: null,
+      currentDirectory: null,
+      currentPath: null,
+      error: null,
+      refreshTree: mockRefreshTree,
+      viewDirectory: mockViewDirectory,
+      loadFile: mockLoadFile,
+      expandToPath: mockExpandToPath,
+      loadPathDirectories: mockLoadPathDirectories,
+      repos: [],
+      isMultiRepo: false,
+      reposLoaded: false, // KEY: repos not loaded yet
+      currentRepo: null,
+      loadRepos: mockLoadRepos,
+      setCurrentRepo: mockSetCurrentRepo,
+    });
+
+    renderPage();
+    // Should show loading indicator, NOT the sidebar or file tree
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(screen.queryByTestId("file-tree")).not.toBeInTheDocument();
+  });
 });

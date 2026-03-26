@@ -19,16 +19,37 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logger.info("Vantage v%s (git %s) starting up", APP_VERSION, GIT_SHA)
-    # Startup logic - use multi-repo watcher in daemon mode
+
+    # Warm the repo activity cache BEFORE accepting requests so that
+    # the very first /api/repos call returns instantly.
+    if settings.multi_repo:
+        from vantage.routers.api import warm_repo_cache
+
+        await warm_repo_cache()
+
+    # Start file watcher
     if settings.multi_repo:
         watcher_task = asyncio.create_task(watch_multi_repo())
     else:
         watcher_task = asyncio.create_task(watch_repo())
+
+    # Start background cache refresh (multi-repo only)
+    refresh_task = None
+    if settings.multi_repo:
+        from vantage.routers.api import refresh_repo_cache_loop
+
+        refresh_task = asyncio.create_task(refresh_repo_cache_loop())
+
     yield
-    # Shutdown logic
+
+    # Shutdown
     watcher_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await watcher_task
+    if refresh_task:
+        refresh_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await refresh_task
 
 
 app = FastAPI(title="Vantage", lifespan=lifespan)

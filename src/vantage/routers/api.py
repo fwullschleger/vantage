@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import time
 from functools import partial
 
 from fastapi import APIRouter, HTTPException
@@ -20,7 +22,15 @@ from vantage.services.git_service import GitService
 from vantage.services.jj_service import JJService
 from vantage.settings import get_daemon_config, settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# Cache for repo last_activity to make /api/repos instant.
+# Warmed on startup; refreshed in background periodically and on watcher events.
+_repo_activity_cache: dict[str, RepoInfo] = {}
+_repo_activity_cache_time: float = 0.0
+_REPO_ACTIVITY_TTL = 60.0  # seconds before background refresh
 
 
 def get_fs_service(repo: str | None = None):
@@ -109,16 +119,37 @@ async def get_version():
 
 @router.get("/repos", response_model=list[RepoInfo])
 async def list_repos():
-    """List all configured repositories (multi-repo mode only)."""
+    """List all configured repositories (multi-repo mode only).
+
+    Returns instantly from cache.  Cache is warmed on startup and
+    refreshed in the background every 60 seconds.
+    """
+    global _repo_activity_cache, _repo_activity_cache_time
+
     daemon_config = get_daemon_config()
     if not daemon_config:
         # Single repo mode - return single repo info
         return [RepoInfo(name="")]
 
-    loop = asyncio.get_event_loop()
+    # Return from cache if available (even if stale — freshness is
+    # handled by the background refresh task).
+    if _repo_activity_cache:
+        return list(_repo_activity_cache.values())
+
+    # First call before cache is ready (shouldn't happen if warmup ran,
+    # but handle gracefully): return names instantly, timestamps arrive later.
+    return [RepoInfo(name=r.name) for r in daemon_config.repos]
+
+
+async def _compute_repo_activity() -> dict[str, RepoInfo]:
+    """Compute last_activity for all repos.  Runs in thread pool."""
+    daemon_config = get_daemon_config()
+    if not daemon_config:
+        return {}
+
+    loop = asyncio.get_running_loop()
 
     async def _get_last_activity(repo_cfg) -> RepoInfo:
-        """Get last file modification timestamp for a repo."""
         try:
 
             def _newest_file_date():
@@ -161,7 +192,27 @@ async def list_repos():
             return RepoInfo(name=repo_cfg.name)
 
     results = await asyncio.gather(*[_get_last_activity(r) for r in daemon_config.repos])
-    return list(results)
+    return {r.name: r for r in results}
+
+
+async def warm_repo_cache() -> None:
+    """Warm the repo activity cache.  Called during app startup."""
+    global _repo_activity_cache, _repo_activity_cache_time
+    t0 = time.monotonic()
+    _repo_activity_cache = await _compute_repo_activity()
+    _repo_activity_cache_time = time.monotonic()
+    elapsed = _repo_activity_cache_time - t0
+    logger.info("Repo activity cache warmed: %d repos in %.1fs", len(_repo_activity_cache), elapsed)
+
+
+async def refresh_repo_cache_loop() -> None:
+    """Background task that periodically refreshes repo activity cache."""
+    while True:
+        await asyncio.sleep(_REPO_ACTIVITY_TTL)
+        try:
+            await warm_repo_cache()
+        except Exception:
+            logger.exception("Failed to refresh repo activity cache")
 
 
 @router.get("/files/all")

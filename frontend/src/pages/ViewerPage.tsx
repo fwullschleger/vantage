@@ -551,6 +551,20 @@ export const ViewerPage: React.FC = () => {
   // Whether to show the sidebar (hide on repo picker page)
   const showSidebar = !(isMultiRepo && !currentRepo);
 
+  // Show a minimal loading state until repos metadata is loaded.
+  // This prevents flashing the single-repo sidebar before multi-repo
+  // mode is detected.
+  if (!reposLoaded) {
+    return (
+      <div className="flex h-screen bg-slate-50 dark:bg-slate-900 items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 size={24} className="animate-spin text-blue-500" />
+          <p className="text-sm text-slate-400">Loading…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-slate-50 dark:bg-slate-900 overflow-hidden text-slate-900 dark:text-slate-100">
       {/* Mobile sidebar backdrop */}
