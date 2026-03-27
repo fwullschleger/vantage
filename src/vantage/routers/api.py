@@ -153,22 +153,7 @@ async def _compute_repo_activity() -> dict[str, RepoInfo]:
         try:
 
             def _newest_file_date():
-                try:
-                    git = GitService(repo_cfg.path, exclude_dirs=settings.exclude_dirs)
-                    recent = git.get_recently_changed_files(limit=1)
-                    if recent and recent[0].get("date"):
-                        from datetime import UTC, datetime
-
-                        date_str = recent[0]["date"]
-                        if isinstance(date_str, str):
-                            dt = datetime.fromisoformat(date_str)
-                            if dt.tzinfo is None:
-                                dt = dt.replace(tzinfo=UTC)
-                            return dt
-                        return date_str
-                except Exception:
-                    pass
-                # Fallback to git log
+                """Get last activity date via a single lightweight git command."""
                 import subprocess
                 from datetime import UTC, datetime
 
@@ -186,9 +171,16 @@ async def _compute_repo_activity() -> dict[str, RepoInfo]:
                     pass
                 return None
 
+            t0 = time.monotonic()
             last = await loop.run_in_executor(None, _newest_file_date)
+            elapsed = (time.monotonic() - t0) * 1000
+            if elapsed > 200:
+                logger.info("[startup] repo '%s' activity query: %.0fms", repo_cfg.name, elapsed)
+            else:
+                logger.debug("[startup] repo '%s' activity query: %.0fms", repo_cfg.name, elapsed)
             return RepoInfo(name=repo_cfg.name, last_activity=last)
         except Exception:
+            logger.exception("[startup] repo '%s' activity query failed", repo_cfg.name)
             return RepoInfo(name=repo_cfg.name)
 
     results = await asyncio.gather(*[_get_last_activity(r) for r in daemon_config.repos])
