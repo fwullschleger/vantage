@@ -143,7 +143,9 @@ def daemon(config: str | None, host: list[str] | None, port: int | None):
     settings_module.set_daemon_config(daemon_cfg)
 
     _warn_nonlocal(daemon_cfg.host)
-    click.echo(f"Starting Vantage daemon on {daemon_cfg.host}:{daemon_cfg.port}")
+    from vantage.services.perf import VERSION_STRING
+
+    click.echo(f"Starting Vantage daemon {VERSION_STRING} on {daemon_cfg.host}:{daemon_cfg.port}")
     click.echo(f"Serving {len(daemon_cfg.repos)} repositories:")
     for repo in daemon_cfg.repos:
         click.echo(f"  - {repo.name}: {repo.path}")
@@ -376,7 +378,11 @@ def perf_report(host: str, port: int, as_json: bool, shape: bool, reset: bool):
 
 def _print_perf_report(data: dict):
     """Pretty-print a performance diagnostics report."""
-    click.secho("═══ Vantage Performance Report ═══", fg="cyan", bold=True)
+    meta = data.get("meta", {})
+    ver = meta.get("app_version", "?")
+    sha = meta.get("git_sha", "?")
+    uptime = meta.get("uptime_s", 0)
+    click.secho(f"═══ Vantage Performance Report ═══  v{ver} ({sha})  up {uptime:.0f}s", fg="cyan", bold=True)
     click.echo()
 
     # Request summary

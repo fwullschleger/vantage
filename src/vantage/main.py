@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from vantage.routers import api, socket
-from vantage.services.perf import APP_VERSION, GIT_SHA, PerfMiddleware
+from vantage.services.perf import VERSION_STRING, PerfMiddleware
 from vantage.services.watcher import watch_multi_repo, watch_repo
 from vantage.settings import settings
 
@@ -21,7 +21,7 @@ async def lifespan(_app: FastAPI):
     import time as _time
 
     t_start = _time.monotonic()
-    logger.info("Vantage v%s (git %s) starting up", APP_VERSION, GIT_SHA)
+    logger.info("Vantage %s starting up", VERSION_STRING)
 
     def _phase(name: str, t0: float) -> float:
         now = _time.monotonic()

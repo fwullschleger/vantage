@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_git_sha() -> str:
-    """Return the short git SHA of the running code, or 'unknown'.
+    """Return the short git SHA of the running code (with dirty flag), or 'unknown'.
 
     Tries the package source dir first, then common workspace locations.
     When installed as a uv tool, __file__ lives outside any git repo,
@@ -42,7 +42,17 @@ def _get_git_sha() -> str:
                 cwd=cwd,
             )
             if proc.returncode == 0 and proc.stdout.strip():
-                return proc.stdout.strip()
+                sha = proc.stdout.strip()
+                # Check for uncommitted changes
+                dirty_proc = subprocess.run(
+                    ["git", "diff", "--quiet", "HEAD"],
+                    capture_output=True,
+                    timeout=5,
+                    cwd=cwd,
+                )
+                if dirty_proc.returncode != 0:
+                    sha += "-dirty"
+                return sha
         except Exception:
             continue
     return "unknown"
@@ -61,6 +71,7 @@ def _get_app_version() -> str:
 # Computed once at import time
 APP_VERSION = _get_app_version()
 GIT_SHA = _get_git_sha()
+VERSION_STRING = f"v{APP_VERSION} ({GIT_SHA})"
 _STARTUP_TIME = time.time()
 
 # ---------------------------------------------------------------------------
