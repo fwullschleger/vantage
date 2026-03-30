@@ -1,5 +1,6 @@
 import logging
 import os
+import subprocess
 import time
 from pathlib import Path
 
@@ -29,6 +30,7 @@ class FileSystemService:
         exclude_dirs: frozenset[str] | None = None,
         allowed_read_roots: list[Path] | None = None,
         show_hidden: bool = True,
+        show_gitignored: bool = True,
     ):
         from vantage.config import DEFAULT_EXCLUDE_DIRS
 
@@ -36,6 +38,7 @@ class FileSystemService:
         self.exclude_dirs = exclude_dirs if exclude_dirs is not None else DEFAULT_EXCLUDE_DIRS
         self.allowed_read_roots = [p.resolve() for p in (allowed_read_roots or [])]
         self.show_hidden = show_hidden
+        self.show_gitignored = show_gitignored
         self._git: GitService | None = None
 
     @property
@@ -118,6 +121,34 @@ class FileSystemService:
         _md_dir_cache[cache_key] = (now, False)
         return False
 
+    def _get_gitignored_names(self, dir_path: Path) -> set[str]:
+        """Return the set of entry names in *dir_path* that are gitignored."""
+        try:
+            entries = os.listdir(dir_path)
+        except OSError:
+            return set()
+        if not entries:
+            return set()
+        # git check-ignore expects paths relative to the repo root (or absolute)
+        paths = [os.path.join(dir_path, e) for e in entries]
+        try:
+            proc = subprocess.run(
+                ["git", "check-ignore", "--stdin", "-z"],
+                input="\0".join(paths),
+                capture_output=True,
+                text=True,
+                cwd=self.root_path,
+                timeout=5,
+            )
+        except Exception:
+            return set()
+        ignored: set[str] = set()
+        for p in proc.stdout.split("\0"):
+            p = p.strip()
+            if p:
+                ignored.add(os.path.basename(p))
+        return ignored
+
     @timed("fs", "list_directory")
     def list_directory(self, path: str = ".", include_git: bool = False) -> list[FileNode]:
         """List a directory's contents.
@@ -131,6 +162,9 @@ class FileSystemService:
 
         nodes = []
         rel_paths: list[str] = []
+        gitignored_names = (
+            self._get_gitignored_names(target_dir) if not self.show_gitignored else set()
+        )
         for entry in os.scandir(target_dir):
             is_dir = entry.is_dir()
             is_markdown = entry.name.lower().endswith(".md")
@@ -140,6 +174,9 @@ class FileSystemService:
                 continue
             # Skip hidden directories/files if configured
             if not self.show_hidden and entry.name.startswith("."):
+                continue
+            # Skip gitignored files/dirs if configured
+            if not self.show_gitignored and entry.name in gitignored_names:
                 continue
 
             if is_dir:

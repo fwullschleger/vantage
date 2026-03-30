@@ -69,6 +69,7 @@ export const ViewerPage: React.FC = () => {
     currentPath,
     error,
     refreshTree,
+    refreshExpandedTree,
     viewDirectory,
     loadFile,
     expandToPath,
@@ -81,6 +82,10 @@ export const ViewerPage: React.FC = () => {
     reposLoaded,
     showEmptyDirs,
     setShowEmptyDirs,
+    showHidden,
+    setShowHidden,
+    showGitignored,
+    setShowGitignored,
     repoSortMode,
     setRepoSortMode,
     sortedRepos,
@@ -177,6 +182,17 @@ export const ViewerPage: React.FC = () => {
       refreshTree();
     }
   }, [refreshTree, isMultiRepo, reposLoaded]);
+
+  // Re-fetch tree and recents when filter settings change
+  const filterSettingsInitialized = useRef(false);
+  useEffect(() => {
+    if (!filterSettingsInitialized.current) {
+      filterSettingsInitialized.current = true;
+      return;
+    }
+    refreshExpandedTree();
+    fetchRecentFiles(true);
+  }, [showHidden, showGitignored, refreshExpandedTree, fetchRecentFiles]);
 
   // Handle URL changes - parse repo and path from URL
   useEffect(() => {
@@ -613,6 +629,10 @@ export const ViewerPage: React.FC = () => {
             <SettingsDropdown
               showEmptyDirs={showEmptyDirs}
               onShowEmptyDirsChange={setShowEmptyDirs}
+              showHidden={showHidden}
+              onShowHiddenChange={setShowHidden}
+              showGitignored={showGitignored}
+              onShowGitignoredChange={setShowGitignored}
               keyboardShortcutsEnabled={keyboardShortcutsEnabled}
               onKeyboardShortcutsEnabledChange={setKeyboardShortcutsEnabled}
               onOpenWhatsNew={whatsNew.open}

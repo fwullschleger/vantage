@@ -607,7 +607,11 @@ class GitService:
 
     @timed("git", "get_recently_changed_files")
     def get_recently_changed_files(
-        self, limit: int = 30, extensions: list[str] | None = None
+        self,
+        limit: int = 30,
+        extensions: list[str] | None = None,
+        show_hidden: bool = True,
+        show_gitignored: bool = True,
     ) -> list[dict[str, Any]]:
         """Get the most recently changed files across the repo.
 
@@ -634,7 +638,7 @@ class GitService:
         if extensions is None:
             extensions = [".md"]
 
-        cache_key = (str(self.repo_path), limit, tuple(extensions))
+        cache_key = (str(self.repo_path), limit, tuple(extensions), show_hidden, show_gitignored)
         now = time.monotonic()
         cached = _recent_files_cache.get(cache_key)
         if cached is not None:
@@ -693,7 +697,7 @@ class GitService:
                     "git",
                     "ls-files",
                     "--others",
-                    "--exclude-standard",
+                    *(["--exclude-standard"] if not show_gitignored else []),
                     "--",
                     *ext_globs,
                 ]
@@ -769,7 +773,7 @@ class GitService:
             if should_skip(rel_path):
                 continue
             parts = rel_path.split("/")
-            if any(p.startswith(".") for p in parts[:-1]):
+            if not show_hidden and any(p.startswith(".") for p in parts[:-1]):
                 continue
             # Apply optional depth limit
             if max_depth is not None and len(parts) - 1 > max_depth:
@@ -813,7 +817,7 @@ class GitService:
             if should_skip(rel_path):
                 continue
             parts = rel_path.split("/")
-            if any(p.startswith(".") for p in parts[:-1]):
+            if not show_hidden and any(p.startswith(".") for p in parts[:-1]):
                 continue
             try:
                 st = full.stat()
@@ -857,6 +861,11 @@ class GitService:
 
                 if not _matches_ext(rel_path):
                     continue
+
+                if not show_hidden:
+                    log_parts = rel_path.split("/")
+                    if any(p.startswith(".") for p in log_parts[:-1]):
+                        continue
 
                 if rel_path in seen_paths:
                     continue
@@ -913,7 +922,7 @@ class GitService:
                     if should_skip(rel_path):
                         continue
                     parts = rel_path.split("/")
-                    if any(p.startswith(".") for p in parts[:-1]):
+                    if not show_hidden and any(p.startswith(".") for p in parts[:-1]):
                         continue
                     try:
                         st = full_path.stat()

@@ -3,6 +3,15 @@ import axios from "axios";
 import { GitCommit, FileDiff, RecentFile, FileStatus } from "../types";
 import { useRepoStore } from "./useRepoStore";
 
+// Build query string for recent files endpoint, including filter state
+const getRecentParams = (limit: number): string => {
+  const { showHidden, showGitignored } = useRepoStore.getState();
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (!showHidden) params.set("show_hidden", "false");
+  if (!showGitignored) params.set("show_gitignored", "false");
+  return params.toString();
+};
+
 // Helper to get API base path.
 // Returns null in multi-repo mode when no repo is selected.
 const getApiBase = (): string | null => {
@@ -131,7 +140,7 @@ export const useGitStore = create<GitState>((set) => ({
           const base = attempt === 0 ? apiBase : getApiBase();
           if (!base) break;
           const response = await axios.get<RecentFile[]>(
-            `${base}/git/recent?limit=30`,
+            `${base}/git/recent?${getRecentParams(30)}`,
           );
           set({ recentFiles: response.data, isRecentLoading: false });
           return;

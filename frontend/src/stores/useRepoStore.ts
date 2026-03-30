@@ -16,6 +16,8 @@ interface RepoState {
   error: string | null;
   expandedDirs: Record<string, boolean>;
   showEmptyDirs: boolean; // Whether to show non-markdown directories
+  showHidden: boolean; // Whether to show hidden (dot-prefixed) files/dirs
+  showGitignored: boolean; // Whether to show gitignored files/dirs
   recentlyChangedPaths: ReadonlySet<string>; // Paths that just changed (for flash animation)
 
   loadRepos: () => Promise<void>;
@@ -32,6 +34,8 @@ interface RepoState {
   expandToPath: (path: string) => void;
   loadPathDirectories: (path: string) => Promise<void>;
   setShowEmptyDirs: (show: boolean) => void;
+  setShowHidden: (show: boolean) => void;
+  setShowGitignored: (show: boolean) => void;
   markPathsChanged: (paths: Iterable<string>) => void;
 }
 
@@ -47,6 +51,18 @@ const getApiBase = (
     return `/api/r/${encodeURIComponent(repo)}`;
   }
   return "/api";
+};
+
+// Build query string for tree endpoints, including filter state
+const getTreeParams = (path: string, extra?: Record<string, string>): string => {
+  const { showHidden, showGitignored } = useRepoStore.getState();
+  const params = new URLSearchParams({ path });
+  if (!showHidden) params.set("show_hidden", "false");
+  if (!showGitignored) params.set("show_gitignored", "false");
+  if (extra) {
+    for (const [k, v] of Object.entries(extra)) params.set(k, v);
+  }
+  return params.toString();
 };
 
 // Helper function to recursively update tree nodes
@@ -110,6 +126,20 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       return true;
     }
   })(),
+  showHidden: (() => {
+    try {
+      return localStorage.getItem("vantage:showHidden") !== "false";
+    } catch {
+      return true;
+    }
+  })(),
+  showGitignored: (() => {
+    try {
+      return localStorage.getItem("vantage:showGitignored") !== "false";
+    } catch {
+      return true;
+    }
+  })(),
   recentlyChangedPaths: new Set<string>(),
 
   markPathsChanged: (paths) => {
@@ -130,6 +160,24 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       /* ignore */
     }
     set({ showEmptyDirs: show });
+  },
+
+  setShowHidden: (show) => {
+    try {
+      localStorage.setItem("vantage:showHidden", String(show));
+    } catch {
+      /* ignore */
+    }
+    set({ showHidden: show });
+  },
+
+  setShowGitignored: (show) => {
+    try {
+      localStorage.setItem("vantage:showGitignored", String(show));
+    } catch {
+      /* ignore */
+    }
+    set({ showGitignored: show });
   },
 
   loadRepos: async () => {
@@ -288,7 +336,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     if (!apiBase) return; // No repo selected in multi-repo mode
     try {
       const response = await axios.get<FileNode[]>(
-        `${apiBase}/tree?path=${encodeURIComponent(path)}`,
+        `${apiBase}/tree?${getTreeParams(path)}`,
         { timeout: 15_000 },
       );
       set((state) => {
@@ -343,7 +391,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     try {
       // include_git=true because DirectoryViewer shows commit messages/dates
       const response = await axios.get<FileNode[]>(
-        `${apiBase}/tree?path=${encodeURIComponent(path)}&include_git=true`,
+        `${apiBase}/tree?${getTreeParams(path, { include_git: "true" })}`,
       );
       set({
         currentDirectory: response.data,
@@ -367,7 +415,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     if (!apiBase) return; // No repo selected in multi-repo mode
     try {
       const response = await axios.get<FileNode[]>(
-        `${apiBase}/tree?path=${encodeURIComponent(path)}`,
+        `${apiBase}/tree?${getTreeParams(path)}`,
       );
       if (path === ".") {
         set((state) => ({
@@ -392,7 +440,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     let rootData: FileNode[] | null = null;
     try {
       const response = await axios.get<FileNode[]>(
-        `${apiBase}/tree?path=.`,
+        `${apiBase}/tree?${getTreeParams(".")}`,
       );
       rootData = response.data;
     } catch (error) {
@@ -411,7 +459,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     const fetches = expanded.map(async (dir) => {
       try {
         const response = await axios.get<FileNode[]>(
-          `${apiBase}/tree?path=${encodeURIComponent(dir)}`,
+          `${apiBase}/tree?${getTreeParams(dir)}`,
           { timeout: 15_000 },
         );
         return { path: dir, children: response.data };

@@ -33,12 +33,16 @@ _repo_activity_cache_time: float = 0.0
 _REPO_ACTIVITY_TTL = 60.0  # seconds before background refresh
 
 
-def get_fs_service(repo: str | None = None):
+def get_fs_service(
+    repo: str | None = None, *, show_hidden: bool | None = None, show_gitignored: bool | None = None
+):
     """Get FileSystemService for the specified repo or default.
 
     In daemon mode, a repo name is required.  Falling back to
     settings.target_repo would serve CWD, which is a security risk.
     """
+    hidden = show_hidden if show_hidden is not None else settings.show_hidden
+    gitignored = show_gitignored if show_gitignored is not None else True
     daemon_config = get_daemon_config()
     if daemon_config:
         if not repo:
@@ -53,12 +57,14 @@ def get_fs_service(repo: str | None = None):
             repo_config.path,
             exclude_dirs=settings.exclude_dirs,
             allowed_read_roots=repo_config.allowed_read_roots,
-            show_hidden=settings.show_hidden,
+            show_hidden=hidden,
+            show_gitignored=gitignored,
         )
     return FileSystemService(
         settings.target_repo,
         exclude_dirs=settings.exclude_dirs,
-        show_hidden=settings.show_hidden,
+        show_hidden=hidden,
+        show_gitignored=gitignored,
     )
 
 
@@ -233,7 +239,9 @@ async def list_all_files_global():
 
 
 @router.get("/recent/all")
-async def get_recent_files_global(limit: int = 10):
+async def get_recent_files_global(
+    limit: int = 10, show_hidden: bool = True, show_gitignored: bool = True
+):
     """Get recently changed files across all repositories."""
     daemon_config = get_daemon_config()
     limit = min(max(limit, 1), 1000)
@@ -243,7 +251,13 @@ async def get_recent_files_global(limit: int = 10):
         git = get_git_service()
         loop = asyncio.get_running_loop()
         files = await loop.run_in_executor(
-            None, partial(git.get_recently_changed_files, limit=limit)
+            None,
+            partial(
+                git.get_recently_changed_files,
+                limit=limit,
+                show_hidden=show_hidden,
+                show_gitignored=show_gitignored,
+            ),
         )
         return [{"repo": "", **f} for f in files]
 
@@ -252,7 +266,13 @@ async def get_recent_files_global(limit: int = 10):
     async def _get_recent(repo_cfg):
         git = GitService(repo_cfg.path, exclude_dirs=settings.exclude_dirs)
         files = await loop.run_in_executor(
-            None, partial(git.get_recently_changed_files, limit=limit)
+            None,
+            partial(
+                git.get_recently_changed_files,
+                limit=limit,
+                show_hidden=show_hidden,
+                show_gitignored=show_gitignored,
+            ),
         )
         return [{"repo": repo_cfg.name, **f} for f in files]
 
@@ -265,8 +285,14 @@ async def get_recent_files_global(limit: int = 10):
 
 # Multi-repo endpoints (when running in daemon mode)
 @router.get("/r/{repo}/tree", response_model=list[FileNode])
-async def get_tree_multi(repo: str, path: str = ".", include_git: bool = False):
-    fs = get_fs_service(repo)
+async def get_tree_multi(
+    repo: str,
+    path: str = ".",
+    include_git: bool = False,
+    show_hidden: bool = True,
+    show_gitignored: bool = True,
+):
+    fs = get_fs_service(repo, show_hidden=show_hidden, show_gitignored=show_gitignored)
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(
@@ -332,11 +358,24 @@ async def get_working_diff_multi(repo: str, path: str):
 
 
 @router.get("/r/{repo}/git/recent")
-async def get_recent_files_multi(repo: str, limit: int = 10):
+async def get_recent_files_multi(
+    repo: str,
+    limit: int = 10,
+    show_hidden: bool = True,
+    show_gitignored: bool = True,
+):
     git = get_git_service(repo)
     limit = min(max(limit, 1), 1000)
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(git.get_recently_changed_files, limit=limit))
+    return await loop.run_in_executor(
+        None,
+        partial(
+            git.get_recently_changed_files,
+            limit=limit,
+            show_hidden=show_hidden,
+            show_gitignored=show_gitignored,
+        ),
+    )
 
 
 @router.get("/r/{repo}/info")
@@ -379,9 +418,14 @@ def _require_single_repo_mode() -> None:
 
 # Legacy single-repo endpoints (backward compatibility)
 @router.get("/tree", response_model=list[FileNode])
-async def get_tree(path: str = ".", include_git: bool = False):
+async def get_tree(
+    path: str = ".",
+    include_git: bool = False,
+    show_hidden: bool = True,
+    show_gitignored: bool = True,
+):
     _require_single_repo_mode()
-    fs = get_fs_service()
+    fs = get_fs_service(show_hidden=show_hidden, show_gitignored=show_gitignored)
     loop = asyncio.get_running_loop()
     try:
         return await loop.run_in_executor(
@@ -444,12 +488,20 @@ async def get_working_diff(path: str):
 
 
 @router.get("/git/recent")
-async def get_recent_files(limit: int = 10):
+async def get_recent_files(limit: int = 10, show_hidden: bool = True, show_gitignored: bool = True):
     _require_single_repo_mode()
     limit = min(max(limit, 1), 1000)
     git = get_git_service()
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, partial(git.get_recently_changed_files, limit=limit))
+    return await loop.run_in_executor(
+        None,
+        partial(
+            git.get_recently_changed_files,
+            limit=limit,
+            show_hidden=show_hidden,
+            show_gitignored=show_gitignored,
+        ),
+    )
 
 
 @router.get("/info")

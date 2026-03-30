@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Settings, Sun, Moon, FolderOpen, Keyboard, Sparkles } from "lucide-react";
+import { Settings, Sun, Moon, FolderOpen, Keyboard, Sparkles, Eye, FileX } from "lucide-react";
 import { cn } from "../lib/utils";
 
 type Theme = "light" | "dark";
@@ -32,6 +32,10 @@ applyTheme(getStoredTheme());
 interface SettingsDropdownProps {
   showEmptyDirs: boolean;
   onShowEmptyDirsChange: (show: boolean) => void;
+  showHidden: boolean;
+  onShowHiddenChange: (show: boolean) => void;
+  showGitignored: boolean;
+  onShowGitignoredChange: (show: boolean) => void;
   keyboardShortcutsEnabled: boolean;
   onKeyboardShortcutsEnabledChange: (enabled: boolean) => void;
   onOpenWhatsNew?: () => void;
@@ -40,6 +44,10 @@ interface SettingsDropdownProps {
 export const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
   showEmptyDirs,
   onShowEmptyDirsChange,
+  showHidden,
+  onShowHiddenChange,
+  showGitignored,
+  onShowGitignoredChange,
   keyboardShortcutsEnabled,
   onKeyboardShortcutsEnabledChange,
   onOpenWhatsNew,
@@ -156,18 +164,44 @@ export const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
             <div className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mb-2">
               File Tree
             </div>
-            <label className="flex items-center gap-2 cursor-pointer group">
-              <input
-                type="checkbox"
-                checked={showEmptyDirs}
-                onChange={(e) => onShowEmptyDirsChange(e.target.checked)}
-                className="rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500 w-3.5 h-3.5"
-              />
-              <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">
-                <FolderOpen size={13} />
-                Show all folders
-              </div>
-            </label>
+            <div className="flex flex-col gap-1.5">
+              <label className="flex items-center gap-2 cursor-pointer group" title="Include folders that don't contain any markdown files">
+                <input
+                  type="checkbox"
+                  checked={showEmptyDirs}
+                  onChange={(e) => onShowEmptyDirsChange(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500 w-3.5 h-3.5"
+                />
+                <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">
+                  <FolderOpen size={13} />
+                  Show all folders
+                </div>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={showHidden}
+                  onChange={(e) => onShowHiddenChange(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500 w-3.5 h-3.5"
+                />
+                <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">
+                  <Eye size={13} />
+                  Show hidden files
+                </div>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer group">
+                <input
+                  type="checkbox"
+                  checked={showGitignored}
+                  onChange={(e) => onShowGitignoredChange(e.target.checked)}
+                  className="rounded border-slate-300 dark:border-slate-600 text-blue-500 focus:ring-blue-500 w-3.5 h-3.5"
+                />
+                <div className="flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-300 group-hover:text-slate-900 dark:group-hover:text-white">
+                  <FileX size={13} />
+                  Show gitignored files
+                </div>
+              </label>
+            </div>
           </div>
 
           {onOpenWhatsNew && (

@@ -13,6 +13,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -25,6 +29,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -34,6 +42,8 @@ describe("SettingsDropdown", () => {
     expect(screen.getByText("Keyboard")).toBeInTheDocument();
     expect(screen.getByText("File Tree")).toBeInTheDocument();
     expect(screen.getByText("Show all folders")).toBeInTheDocument();
+    expect(screen.getByText("Show hidden files")).toBeInTheDocument();
+    expect(screen.getByText("Show gitignored files")).toBeInTheDocument();
     expect(screen.getByText("Enable shortcuts")).toBeInTheDocument();
   });
 
@@ -43,6 +53,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={false}
         onShowEmptyDirsChange={onChange}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -58,6 +72,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -75,6 +93,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -90,6 +112,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={true}
         onKeyboardShortcutsEnabledChange={vi.fn()}
       />,
@@ -106,6 +132,10 @@ describe("SettingsDropdown", () => {
       <SettingsDropdown
         showEmptyDirs={true}
         onShowEmptyDirsChange={vi.fn()}
+        showHidden={true}
+        onShowHiddenChange={vi.fn()}
+        showGitignored={true}
+        onShowGitignoredChange={vi.fn()}
         keyboardShortcutsEnabled={false}
         onKeyboardShortcutsEnabledChange={onKeyboardShortcutsEnabledChange}
       />,
