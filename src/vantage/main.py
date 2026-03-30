@@ -1,11 +1,12 @@
 import asyncio
 import contextlib
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from vantage.routers import api, socket
@@ -14,6 +15,9 @@ from vantage.services.watcher import watch_multi_repo, watch_repo
 from vantage.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Cache the injected index.html so we only do string replacement once.
+_cached_index_html: str | None = None
 
 
 @asynccontextmanager
@@ -99,6 +103,31 @@ for path in possible_paths:
         frontend_dist = path
         break
 
+
+def _get_frontend_config() -> dict:
+    """Build the frontend config dict from current settings."""
+    return {
+        "disableWhatsNew": settings.disable_whats_new,
+    }
+
+
+def _get_index_html(frontend_dir: str) -> str:
+    """Read index.html and inject __VANTAGE_CONFIG__. Result is cached."""
+    global _cached_index_html
+    if _cached_index_html is not None:
+        return _cached_index_html
+
+    index_path = os.path.join(frontend_dir, "index.html")
+    with open(index_path) as f:
+        html = f.read()
+
+    config_json = json.dumps(_get_frontend_config(), separators=(",", ":"))
+    config_script = f"<script>window.__VANTAGE_CONFIG__={config_json}</script>"
+    html = html.replace("<head>", f"<head>{config_script}", 1)
+    _cached_index_html = html
+    return html
+
+
 if frontend_dist:
     app.mount(
         "/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets"
@@ -106,12 +135,17 @@ if frontend_dist:
 
     @app.get("/{full_path:path}")
     async def serve_frontend(full_path: str):
-        # Allow API routes to pass through if they weren't caught above (though they should be by include_router)
+        # Allow API routes to pass through
         if full_path.startswith("api"):
             return {"error": "Not found"}
 
-        # Serve index.html for SPA routing
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
+        # Check for static files first (favicon, etc.)
+        static_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.isfile(static_path):
+            return FileResponse(static_path)
+
+        # SPA routing — serve index.html with injected config
+        return HTMLResponse(_get_index_html(frontend_dist))
 else:
 
     @app.get("/")

@@ -65,6 +65,7 @@ class DaemonConfig:
     show_hidden: bool = True
     walk_max_depth: int | None = None
     walk_timeout: float = 30.0
+    disable_whats_new: bool = False
 
     @classmethod
     def from_file(cls, config_path: Path | None = None) -> "DaemonConfig":
@@ -104,6 +105,7 @@ class DaemonConfig:
             show_hidden=data.get("show_hidden", True),
             walk_max_depth=data.get("walk_max_depth"),
             walk_timeout=data.get("walk_timeout", 30.0),
+            disable_whats_new=data.get("disable_whats_new", False),
         )
 
         if source_dirs:

@@ -4,6 +4,14 @@ import { appVersion } from "virtual:changelog";
 const LAST_SEEN_KEY = "vantage:lastSeenVersion";
 const OPT_OUT_KEY = "vantage:whatsNewOptOut";
 
+declare global {
+  interface Window {
+    __VANTAGE_CONFIG__?: {
+      disableWhatsNew?: boolean;
+    };
+  }
+}
+
 /** Compare semver strings. Returns true if a > b. */
 function isNewerVersion(a: string, b: string): boolean {
   const pa = a.split(".").map(Number);
@@ -15,12 +23,14 @@ function isNewerVersion(a: string, b: string): boolean {
   return false;
 }
 
-/** Hook to manage "What's New" auto-display logic. */
+/** Hook to manage "What's New" auto-display logic.
+ *  Suppressed by backend config `disable_whats_new = true`. */
 export function useWhatsNew() {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     try {
+      if (window.__VANTAGE_CONFIG__?.disableWhatsNew) return;
       const optOut = localStorage.getItem(OPT_OUT_KEY) === "true";
       if (optOut) return;
       const lastSeen = localStorage.getItem(LAST_SEEN_KEY);

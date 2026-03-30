@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # Performance tuning for large repos (defaults: no limits)
     walk_max_depth: int | None = None  # max directory depth for untracked file discovery
     walk_timeout: float = 30.0  # timeout in seconds for git ls-files subprocess
+    # UI overrides
+    disable_whats_new: bool = False  # suppress the "What's New" modal
 
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -44,6 +46,7 @@ def set_daemon_config(config: DaemonConfig):
         show_hidden=config.show_hidden,
         walk_max_depth=config.walk_max_depth,
         walk_timeout=config.walk_timeout,
+        disable_whats_new=config.disable_whats_new,
     )
 
 
