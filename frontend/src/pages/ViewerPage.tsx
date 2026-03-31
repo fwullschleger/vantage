@@ -294,20 +294,6 @@ export const ViewerPage: React.FC = () => {
     }
   }, [currentPath, fetchStatus]);
 
-  // In static mode, auto-navigate to README.md when at root (if it exists)
-  useEffect(() => {
-    if (!isStaticMode()) return;
-    const fullPath = pathParam || "";
-    if (fullPath !== "" && fullPath !== ".") return;
-    if (fileTree.length === 0) return; // Tree not loaded yet
-
-    const readme = fileTree.find(
-      (f) => f.name.toLowerCase() === "readme.md" && !f.is_dir,
-    );
-    if (readme) {
-      navigate(`/${readme.path}`, { replace: true });
-    }
-  }, [pathParam, fileTree, navigate]);
 
   // Scroll to top when navigating to a new file, or to anchor if hash is present.
   // When the *same* file updates (live reload), preserve scroll position.
