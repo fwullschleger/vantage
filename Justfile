@@ -205,7 +205,7 @@ build-docs:
     echo "--- Building frontend ---"
     cd frontend && npm run build && cd ..
     echo "--- Building static user guide ---"
-    uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+    uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide"
     rm -f dist/docs/_redirects  # Workers routing, not Pages
     echo "--- Done: dist/docs/ ---"
 

@@ -37,7 +37,7 @@ jobs:
 
       - name: Build user guide
         run: |
-          uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+          uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide"
           rm -f dist/docs/_redirects  # Workers uses wrangler.toml routing, not Pages _redirects
 
       - name: Deploy to Cloudflare Workers

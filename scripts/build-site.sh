@@ -9,6 +9,6 @@ cd ..
 
 echo "--- Building Static Documentation Site ---"
 # 'vantage' was installed via 'pip install .' by Cloudflare automatically
-vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide"
 
 echo "--- Build Complete ---"

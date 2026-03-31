@@ -6,7 +6,7 @@ set -e
 
 cd frontend && npm ci && npm run build && cd ..
 pip install .
-vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide"
 
 # Remove _redirects — it's for Cloudflare Pages SPA routing, not Workers.
 # Workers uses not_found_handling in wrangler.toml + 404.html instead.
