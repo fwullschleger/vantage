@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { appVersion } from "virtual:changelog";
+import { isStaticMode } from "../lib/staticMode";
 
 const LAST_SEEN_KEY = "vantage:lastSeenVersion";
 const OPT_OUT_KEY = "vantage:whatsNewOptOut";
@@ -30,6 +31,7 @@ export function useWhatsNew() {
 
   useEffect(() => {
     try {
+      if (isStaticMode()) return;
       if (window.__VANTAGE_CONFIG__?.disableWhatsNew) return;
       const optOut = localStorage.getItem(OPT_OUT_KEY) === "true";
       if (optOut) return;
