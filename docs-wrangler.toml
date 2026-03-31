@@ -1,4 +1,4 @@
-name = "vantage-docs"
+name = "vantage"
 compatibility_date = "2025-12-01"
 main = "docs-worker.js"
 

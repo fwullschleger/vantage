@@ -36,7 +36,9 @@ jobs:
         run: cd frontend && npm run build
 
       - name: Build user guide
-        run: uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+        run: |
+          uv run vantage build userguide/ -o dist/docs --frontend-dist frontend/dist -n "Vantage User Guide" --base-path /docs/
+          rm -f dist/docs/_redirects  # Workers uses wrangler.toml routing, not Pages _redirects
 
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --config docs-wrangler.toml
