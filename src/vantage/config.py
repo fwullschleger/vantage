@@ -109,11 +109,11 @@ class DaemonConfig:
         )
 
         if source_dirs:
-            config._discover_repos_from_source_dirs()
+            config.discover_repos_from_source_dirs()
 
         return config
 
-    def _discover_repos_from_source_dirs(self) -> list["RepoConfig"]:
+    def discover_repos_from_source_dirs(self) -> list["RepoConfig"]:
         """Scan source_dirs for git repos and add any not already configured.
 
         A subdirectory is considered a repo if it contains a ``.git``

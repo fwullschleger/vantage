@@ -25,6 +25,15 @@ vantage = "vantage.cli:main"
 [tool.setuptools.package-data]
 vantage = ["frontend_dist/**/*"]
 
+[tool.basedpyright]
+typeCheckingMode = "standard"
+reportAny = false
+reportExplicitAny = false
+reportUnusedCallResult = false
+reportUnknownMemberType = false
+reportUnknownVariableType = false
+reportUnannotatedClassAttribute = false
+
 [dependency-groups]
 dev = [
     "basedpyright>=1.37.0",

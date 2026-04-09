@@ -21,7 +21,8 @@ logger = logging.getLogger(__name__)
 # Lightweight TTL cache for recent-files results.  Keyed by
 # (repo_path, limit, extensions_tuple).  Shared across GitService
 # instances so multiple tabs hitting the same repo benefit.
-_recent_files_cache: dict[tuple, tuple[float, list[dict[str, Any]]]] = {}
+_RecentFilesCacheKey = tuple[str, int, tuple[str, ...], bool, bool]
+_recent_files_cache: dict[_RecentFilesCacheKey, tuple[float, list[dict[str, Any]]]] = {}
 _RECENT_FILES_TTL = 30.0  # seconds — most expensive call, staleness is acceptable
 
 # TTL cache for git status results.  Keyed by repo_path string.
@@ -164,14 +165,14 @@ class GitService:
             if not paths:
                 return {}
             # Delegate to child repos when parent is not a git repo
-            result: dict[str, GitCommit] = {}
+            child_result: dict[str, GitCommit] = {}
             for p in paths:
                 child = self._resolve_child_repo(p)
                 if child:
                     commit = child[0].get_last_commit(child[1])
                     if commit:
-                        result[p] = commit
-            return result
+                        child_result[p] = commit
+            return child_result
 
         result: dict[str, GitCommit] = {}
         remaining = set(paths)
@@ -677,9 +678,9 @@ class GitService:
 
             # Truly no git – filesystem walk only
             untracked = self._find_untracked_md_files()
-            results: list[dict[str, Any]] = [f for f in untracked if not should_skip(f["path"])]
-            results.sort(key=lambda r: r["date"], reverse=True)
-            trimmed = results[:limit]
+            no_git_results = [f for f in untracked if not should_skip(f["path"])]
+            no_git_results.sort(key=lambda r: r["date"], reverse=True)
+            trimmed = no_git_results[:limit]
             _recent_files_cache[cache_key] = (time.monotonic(), trimmed)
             return trimmed
 

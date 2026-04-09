@@ -3,6 +3,7 @@ import os
 import sys
 from importlib.metadata import version as pkg_version
 from pathlib import Path
+from typing import Any
 
 import click
 import uvicorn
@@ -42,7 +43,7 @@ def _warn_nonlocal(host: str | list[str]) -> None:
     if non_local:
         click.secho(
             f"⚠ WARNING: Binding to non-localhost address(es): {', '.join(non_local)}. "
-            "Vantage has no authentication — all files in the served directory will be accessible.",
+            + "Vantage has no authentication — all files in the served directory will be accessible.",
             fg="yellow",
             err=True,
         )
@@ -51,7 +52,7 @@ def _warn_nonlocal(host: str | list[str]) -> None:
 @click.group(invoke_without_command=True)
 @click.version_option(version=_get_version(), prog_name="vantage")
 @click.pass_context
-def cli(ctx):
+def cli(ctx: click.Context):
     """Vantage: View LLM-generated Markdown files with GitHub-like rendering."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(serve)
@@ -81,13 +82,16 @@ def serve(repo_path: str | None, host: str | None, port: int | None, show_hidden
 
     from vantage import settings
 
-    importlib.reload(settings)
+    _ = importlib.reload(settings)
 
     final_settings = settings.get_settings()
 
     _warn_nonlocal(final_settings.host)
     _configure_app_logging()
-    uvicorn.run("vantage.main:app", host=final_settings.host, port=final_settings.port, reload=True)
+    run_host = (
+        final_settings.host if isinstance(final_settings.host, str) else final_settings.host[0]
+    )
+    uvicorn.run("vantage.main:app", host=run_host, port=final_settings.port, reload=True)
 
 
 @cli.command()
@@ -183,7 +187,7 @@ def daemon(config: str | None, host: list[str] | None, port: int | None):
 
         threads = []
 
-        def run_server(h):
+        def run_server(h: str):
             uvicorn.run(
                 "vantage.main:app",
                 host=h,
@@ -227,7 +231,7 @@ def init_config(path: str | None, force: bool):
 
 @cli.command("install-service")
 @click.option("--user", is_flag=True, default=True, help="Install as user service (default)")
-def install_service(user: bool):  # noqa: ARG001
+def install_service(_user: bool):
     """Install Vantage as a systemd user service."""
     import shutil
     import subprocess
@@ -275,7 +279,7 @@ WantedBy=default.target
 """
 
     with open(service_file, "w") as f:
-        f.write(service_content)
+        _ = f.write(service_content)
 
     click.echo(f"Created systemd service: {service_file}")
     click.echo("\nTo enable and start the service:")
@@ -314,7 +318,9 @@ WantedBy=default.target
     default="/",
     help="URL base path for deployment (e.g., /docs/). Currently unused — assets use relative paths.",
 )
-def build(repo_path: str, output: str, frontend_dist: str | None, name: str | None, base_path: str):  # noqa: ARG001
+def build(
+    repo_path: str, output: str, frontend_dist: str | None, name: str | None, _base_path: str
+):
     """Build a static site from a markdown repository.
 
     This generates a fully self-contained static site with pre-rendered
@@ -395,7 +401,7 @@ def perf_report(host: str, port: int, as_json: bool, shape: bool, reset: bool):
             click.echo("\n⚠ Failed to reset counters.", err=True)
 
 
-def _print_perf_report(data: dict):
+def _print_perf_report(data: dict[str, Any]):
     """Pretty-print a performance diagnostics report."""
     meta = data.get("meta", {})
     ver = meta.get("app_version", "?")

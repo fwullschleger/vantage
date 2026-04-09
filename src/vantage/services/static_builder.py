@@ -33,12 +33,12 @@ class StaticSiteBuilder:
             frontend_dist: Optional path to pre-built frontend dist.
             repo_name: Optional name for the repo (defaults to directory name).
         """
-        self.source_path = source_path.resolve()
-        self.output_path = output_path.resolve()
-        self.frontend_dist = frontend_dist
-        self.repo_name = repo_name or self.source_path.name
-        self.fs_service = FileSystemService(source_path)
-        self.git_service = GitService(source_path)
+        self.source_path: Path = source_path.resolve()
+        self.output_path: Path = output_path.resolve()
+        self.frontend_dist: Path | None = frontend_dist
+        self.repo_name: str = repo_name or self.source_path.name
+        self.fs_service: FileSystemService = FileSystemService(source_path)
+        self.git_service: GitService = GitService(source_path)
 
     def build(self) -> None:
         """Build the static site."""
@@ -77,10 +77,10 @@ class StaticSiteBuilder:
                 frontend_dir = project_root / "frontend"
                 if not frontend_dir.exists():
                     raise ValueError(
-                        f"Frontend not found. Looked in:\n"
-                        f"  Bundled: {bundled}\n"
-                        f"  Source:  {frontend_dir}\n"
-                        f"Provide --frontend-dist explicitly."
+                        "Frontend not found. Looked in:\n"
+                        + f"  Bundled: {bundled}\n"
+                        + f"  Source:  {frontend_dir}\n"
+                        + "Provide --frontend-dist explicitly."
                     )
 
                 print("Building frontend...")

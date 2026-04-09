@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel
 
@@ -17,8 +18,8 @@ class FileNode(BaseModel):
     is_dir: bool
     has_markdown: bool = True
     git_status: str | None = None  # 'modified', 'added', 'deleted', 'untracked', 'contains_changes'
-    last_commit: Optional["GitCommit"] = None
-    children: list["FileNode"] | None = None
+    last_commit: GitCommit | None = None
+    children: list[FileNode] | None = None
     is_symlink: bool = False
     symlink_target: str | None = None  # relative path to target (None = broken/external)
 

@@ -3,7 +3,9 @@ import contextlib
 import json
 import logging
 import os
+from collections.abc import Callable, Coroutine
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
@@ -75,7 +77,9 @@ app.add_middleware(PerfMiddleware)
 
 
 @app.middleware("http")
-async def security_headers(request: Request, call_next):
+async def security_headers(
+    request: Request, call_next: Callable[[Request], Coroutine[Any, Any, Response]]
+):
     response: Response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -104,7 +108,7 @@ for path in possible_paths:
         break
 
 
-def _get_frontend_config() -> dict:
+def _get_frontend_config() -> dict[str, object]:
     """Build the frontend config dict from current settings."""
     return {
         "disableWhatsNew": settings.disable_whats_new,
@@ -140,11 +144,13 @@ if frontend_dist:
             return {"error": "Not found"}
 
         # Check for static files first (favicon, etc.)
+        assert frontend_dist is not None
         static_path = os.path.join(frontend_dist, full_path)
         if full_path and os.path.isfile(static_path):
             return FileResponse(static_path)
 
         # SPA routing — serve index.html with injected config
+        assert frontend_dist is not None
         return HTMLResponse(_get_index_html(frontend_dist))
 else:
 

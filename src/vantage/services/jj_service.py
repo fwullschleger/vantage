@@ -26,7 +26,7 @@ class JJService:
     """Wraps jj CLI commands for a given repository."""
 
     def __init__(self, repo_path: Path) -> None:
-        self.repo_path = repo_path
+        self.repo_path: Path = repo_path
         self._is_jj: bool | None = None
 
     @property

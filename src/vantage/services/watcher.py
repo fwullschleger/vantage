@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import override
 
 from watchfiles import Change, DefaultFilter, watch
 
@@ -47,6 +48,7 @@ class _GitAwareFilter(DefaultFilter):
     filtered to avoid noise.
     """
 
+    @override
     def __call__(self, change: Change, path: str) -> bool:
         # Fast path: let the default filter handle non-.git paths
         parts = path.replace("\\", "/").split("/")
@@ -220,7 +222,9 @@ async def watch_multi_repo():
 
         queue: asyncio.Queue[set[tuple[Change, str]] | None] = asyncio.Queue()
 
-        def _start_watcher(paths: list[Path], q: asyncio.Queue) -> None:
+        def _start_watcher(
+            paths: list[Path], q: asyncio.Queue[set[tuple[Change, str]] | None]
+        ) -> None:
             logger.info("Initializing file watchers for %d repos...", len(paths))
             t0 = time.monotonic()
             first = True

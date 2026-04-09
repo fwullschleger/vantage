@@ -5,6 +5,7 @@ from functools import partial
 
 from fastapi import APIRouter, HTTPException
 
+from vantage.config import RepoConfig
 from vantage.schemas.models import (
     FileContent,
     FileDiff,
@@ -156,7 +157,7 @@ async def _compute_repo_activity() -> dict[str, RepoInfo]:
 
     loop = asyncio.get_running_loop()
 
-    async def _get_last_activity(repo_cfg) -> RepoInfo:
+    async def _get_last_activity(repo_cfg: RepoConfig) -> RepoInfo:
         try:
 
             def _newest_file_date():
@@ -215,7 +216,7 @@ async def refresh_repo_cache_loop() -> None:
         try:
             daemon_config = get_daemon_config()
             if daemon_config and daemon_config.source_dirs:
-                new_repos = daemon_config._discover_repos_from_source_dirs()
+                new_repos = daemon_config.discover_repos_from_source_dirs()
                 if new_repos:
                     logger.info(
                         "Discovered %d new repo(s): %s",
@@ -243,7 +244,7 @@ async def list_all_files_global():
 
     loop = asyncio.get_running_loop()
 
-    async def _get_files(repo_cfg):
+    async def _get_files(repo_cfg: RepoConfig):
         fs = FileSystemService(
             repo_cfg.path,
             exclude_dirs=settings.exclude_dirs,
@@ -282,7 +283,7 @@ async def get_recent_files_global(
 
     loop = asyncio.get_running_loop()
 
-    async def _get_recent(repo_cfg):
+    async def _get_recent(repo_cfg: RepoConfig):
         git = GitService(repo_cfg.path, exclude_dirs=settings.exclude_dirs)
         files = await loop.run_in_executor(
             None,
@@ -639,7 +640,7 @@ async def get_perf_diagnostics(include_shape: bool = False):
     result = await loop.run_in_executor(None, perf_store.build_diagnostics)
 
     if include_shape:
-        repo_shapes: dict = {}
+        repo_shapes: dict[str, dict[str, object]] = {}
         daemon_cfg = get_daemon_config()
         if daemon_cfg:
             for i, repo_cfg in enumerate(daemon_cfg.repos):

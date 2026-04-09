@@ -13,11 +13,15 @@ import os
 import subprocess
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, ParamSpec, TypeVar, override
 
 from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 logger = logging.getLogger(__name__)
 
@@ -127,8 +131,8 @@ class PerfStore:
 
     def __init__(self, maxlen: int = _MAX_RECORDS) -> None:
         self._records: deque[TimingRecord] = deque(maxlen=maxlen)
-        self._request_count = 0
-        self._service_call_count = 0
+        self._request_count: int = 0
+        self._service_call_count: int = 0
 
     def record(self, rec: TimingRecord) -> None:
         self._records.append(rec)
@@ -164,7 +168,9 @@ class PerfStore:
                 buckets[r.operation].append(r.duration_ms)
         return {op: _compute_percentiles(durations) for op, durations in sorted(buckets.items())}
 
-    def slow_requests(self, threshold_ms: float = 500, limit: int = 20) -> list[dict]:
+    def slow_requests(
+        self, threshold_ms: float = 500, limit: int = 20
+    ) -> list[dict[str, str | float | int | None]]:
         """Return the slowest requests above threshold."""
         slow = [
             {
@@ -176,10 +182,10 @@ class PerfStore:
             for r in self._records
             if r.category == "request" and r.duration_ms >= threshold_ms
         ]
-        slow.sort(key=lambda x: x["duration_ms"], reverse=True)
+        slow.sort(key=lambda x: (x["duration_ms"] is None, x["duration_ms"]), reverse=True)
         return slow[:limit]
 
-    def build_diagnostics(self) -> dict:
+    def build_diagnostics(self) -> dict[str, Any]:
         """Build the full diagnostics dict — all computation in one call."""
         t0 = time.perf_counter()
 
@@ -253,7 +259,8 @@ perf_store = PerfStore()
 class PerfMiddleware(BaseHTTPMiddleware):
     """Records request timing for all /api/ routes."""
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    @override
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
 
         # Skip non-API and perf endpoints entirely
@@ -312,7 +319,9 @@ class PerfMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 
-def timed(category: str, operation: str | None = None):
+def timed(
+    category: str, operation: str | None = None
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator that records timing of a function call into perf_store.
 
     Usage:
@@ -320,11 +329,11 @@ def timed(category: str, operation: str | None = None):
         def get_log(self, ...): ...
     """
 
-    def decorator(func):
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
         op_name = operation or func.__name__
 
         @functools.wraps(func)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
             start = time.perf_counter()
             try:
                 return func(*args, **kwargs)

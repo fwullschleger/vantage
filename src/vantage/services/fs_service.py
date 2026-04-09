@@ -34,11 +34,13 @@ class FileSystemService:
     ):
         from vantage.config import DEFAULT_EXCLUDE_DIRS
 
-        self.root_path = root_path.resolve()
-        self.exclude_dirs = exclude_dirs if exclude_dirs is not None else DEFAULT_EXCLUDE_DIRS
-        self.allowed_read_roots = [p.resolve() for p in (allowed_read_roots or [])]
-        self.show_hidden = show_hidden
-        self.show_gitignored = show_gitignored
+        self.root_path: Path = root_path.resolve()
+        self.exclude_dirs: frozenset[str] = (
+            exclude_dirs if exclude_dirs is not None else DEFAULT_EXCLUDE_DIRS
+        )
+        self.allowed_read_roots: list[Path] = [p.resolve() for p in (allowed_read_roots or [])]
+        self.show_hidden: bool = show_hidden
+        self.show_gitignored: bool = show_gitignored
         self._git: GitService | None = None
 
     @property
