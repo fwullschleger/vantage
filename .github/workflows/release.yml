@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"            # Full release: v0.3.5
+      - "vantage-md@*"  # npm-only release: vantage-md@0.1.5
+
+permissions:
+  contents: write  # gh release create
+  id-token: write  # npm provenance (OIDC trusted publishing)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Setup Node with npm registry
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .mise.toml
+          registry-url: https://registry.npmjs.org
+
+      - name: Install Python dependencies
+        run: uv sync
+
+      - name: Build vantage-md
+        run: cd packages/vantage-md && npm ci && npx tsup
+
+      - name: Install frontend deps
+        run: cd frontend && npm ci
+
+      # --- npm publish with provenance (runs for all release tags) ---
+      - name: Publish vantage-md to npm
+        run: cd packages/vantage-md && npm publish --provenance --access public
+
+      # --- Python build + GitHub release (only for v* tags) ---
+      - name: Build frontend
+        if: startsWith(github.ref_name, 'v')
+        run: cd frontend && npm run build
+
+      - name: Bundle frontend into Python package
+        if: startsWith(github.ref_name, 'v')
+        run: python3 -c "import shutil; from pathlib import Path; dst=Path('src/vantage/frontend_dist'); shutil.rmtree(dst, ignore_errors=True); shutil.copytree('frontend/dist', dst)"
+
+      - name: Build Python wheel
+        if: startsWith(github.ref_name, 'v')
+        run: uv build
+
+      - name: Create GitHub release
+        if: startsWith(github.ref_name, 'v')
+        run: |
+          gh release create "${{ github.ref_name }}" dist/*.whl dist/*.tar.gz \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

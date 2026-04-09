@@ -274,21 +274,12 @@ release bump="patch": _ensure-env
     git commit -m "release: v${new_py} / vantage-md@${new_npm}" --no-verify
     git tag -a "v${new_py}" -m "v${new_py}"
 
-    # — 5. Build both packages —
-    just build
-    cd packages/vantage-md && npx tsup && cd ../..
-
-    # — 6. Push + publish —
+    # — 5. Push (CI handles build, npm publish, and GitHub release) —
     git push origin main --follow-tags
-    cd packages/vantage-md && npm publish && cd ../..
-
-    # — 7. GitHub release (with Python wheel + tarball as assets) —
-    gh release create "v${new_py}" dist/*.whl dist/*.tar.gz \
-        --title "v${new_py}" \
-        --generate-notes
 
     echo ""
-    echo "Released: vantage v${new_py} + vantage-md@${new_npm}"
+    echo "Pushed: v${new_py} / vantage-md@${new_npm}"
+    echo "CI will publish npm package and create GitHub release."
 
 # Release only the npm package (vantage-md).
 # Usage: just release-npm patch
@@ -325,12 +316,12 @@ release-npm bump="patch": _ensure-env
     git commit -m "release: vantage-md@${new}" --no-verify
     git tag -a "vantage-md@${new}" -m "vantage-md@${new}"
 
-    # — 4. Push + publish —
+    # — 4. Push (CI handles npm publish) —
     git push origin main --follow-tags
-    cd packages/vantage-md && npm publish
 
     echo ""
-    echo "Released: vantage-md@${new}"
+    echo "Pushed: vantage-md@${new}"
+    echo "CI will publish to npm."
 
 # Build the static user guide docs
 build-docs:
