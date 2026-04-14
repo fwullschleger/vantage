@@ -140,6 +140,15 @@ export const ViewerPage: React.FC = () => {
       return false;
     }
   });
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem("vantage:sidebar-width");
+      return saved ? Math.max(200, Math.min(600, Number(saved))) : 288;
+    } catch {
+      return 288;
+    }
+  });
+  const isResizingRef = useRef(false);
   const [showRaw, setShowRaw] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pathCopied, setPathCopied] = useState(false);
@@ -674,6 +683,42 @@ export const ViewerPage: React.FC = () => {
     setSidebarOpen(false); // eslint-disable-line react-hooks/set-state-in-effect
   }, [pathParam]);
 
+  const handleSidebarResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      isResizingRef.current = true;
+      const startX = e.clientX;
+      const startWidth = sidebarWidth;
+
+      const onMouseMove = (e: MouseEvent) => {
+        if (!isResizingRef.current) return;
+        const newWidth = Math.max(200, Math.min(600, startWidth + (e.clientX - startX)));
+        setSidebarWidth(newWidth);
+      };
+
+      const onMouseUp = () => {
+        isResizingRef.current = false;
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", onMouseUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    },
+    [sidebarWidth],
+  );
+
+  // Persist sidebar width on change
+  useEffect(() => {
+    try {
+      localStorage.setItem("vantage:sidebar-width", String(sidebarWidth));
+    } catch { /* ignore */ }
+  }, [sidebarWidth]);
+
   const breadcrumbs =
     currentPath && currentPath !== "." ? currentPath.split("/") : [];
 
@@ -709,8 +754,9 @@ export const ViewerPage: React.FC = () => {
         {/* Sidebar - hidden on repo picker page, collapsible on desktop */}
         {showSidebar && (
           <div
+            style={{ width: sidebarWidth }}
             className={cn(
-              "w-72 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-white dark:bg-slate-800 shadow-sm",
+              "shrink-0 border-r border-slate-200 dark:border-slate-700 flex flex-col bg-white dark:bg-slate-800 shadow-sm",
               "fixed inset-y-0 left-0 z-50 transition-transform duration-200 ease-in-out md:relative md:z-auto",
               sidebarOpen ? "translate-x-0" : "-translate-x-full",
               sidebarCollapsed
@@ -886,6 +932,16 @@ export const ViewerPage: React.FC = () => {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Sidebar resize handle */}
+        {showSidebar && (
+          <div
+            className="hidden md:flex w-1 cursor-col-resize items-center justify-center hover:bg-blue-500/20 active:bg-blue-500/30 transition-colors group shrink-0"
+            onMouseDown={handleSidebarResizeStart}
+          >
+            <div className="w-px h-8 bg-slate-300 dark:bg-slate-600 group-hover:bg-blue-500 group-active:bg-blue-500 transition-colors rounded-full" />
           </div>
         )}
 
