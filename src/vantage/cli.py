@@ -236,7 +236,7 @@ def init_config(path: str | None, force: bool):
 
 @cli.command("install-service")
 @click.option("--user", is_flag=True, default=True, help="Install as user service (default)")
-def install_service(_user: bool):
+def install_service(user: bool):  # noqa: ARG001
     """Install Vantage as a systemd user service."""
     import shutil
     import subprocess
@@ -324,7 +324,11 @@ WantedBy=default.target
     help="URL base path for deployment (e.g., /docs/). Currently unused — assets use relative paths.",
 )
 def build(
-    repo_path: str, output: str, frontend_dist: str | None, name: str | None, _base_path: str
+    repo_path: str,
+    output: str,
+    frontend_dist: str | None,
+    name: str | None,
+    base_path: str,  # noqa: ARG001
 ):
     """Build a static site from a markdown repository.
 
